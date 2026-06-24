@@ -58,11 +58,11 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     const cwd = path.join(site.rootPath, 'current')
 
     const cmd = pkg
-      ? `composer update ${pkg} --no-interaction --no-ansi -W 2>&1`
-      : `composer update --no-interaction --no-ansi 2>&1`
+      ? `composer update "${pkg}" --no-interaction --no-ansi --ignore-platform-reqs -W 2>&1`
+      : `composer update --no-interaction --no-ansi --ignore-platform-reqs 2>&1`
 
     try {
-      const { stdout } = await exec(cmd, { cwd, timeout: 300_000 })
+      const { stdout } = await exec(cmd, { cwd, timeout: 300_000, env: { ...process.env, COMPOSER_ALLOW_SUPERUSER: '1' } })
       app.audit('composer.update', { siteId: site.id, meta: { package: pkg ?? 'all', domain: site.domain } })
       return { ok: true, output: stdout }
     } catch (err: unknown) {

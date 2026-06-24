@@ -103,8 +103,18 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const group = `${site.domain}-worker`
+    const configPath = `/etc/supervisor/conf.d/${site.domain}-worker.conf`
     let output = ''
     let ok = false
+
+    // If starting, ensure the supervisor config exists first
+    if (action === 'start') {
+      const configExists = await fs.access(configPath).catch(() => null)
+      if (configExists === null) {
+        await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
+        await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
+      }
+    }
 
     try {
       const result = await exec(`supervisorctl ${action} "${group}:" 2>&1`)
@@ -113,6 +123,28 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; message?: string }
       output = (e.stdout ?? e.stderr ?? e.message ?? '').trim()
+    }
+
+    // If control command failed with "no such group", try writing config and retrying
+    if (!ok && output.includes('no such group')) {
+      const configExists = await fs.access(configPath).catch(() => null)
+      if (configExists === null) {
+        await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
+        await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
+        try {
+          const result = await exec(`supervisorctl ${action} "${group}:" 2>&1`)
+          output = (result.stdout + result.stderr).trim()
+          ok = true
+        } catch (err: unknown) {
+          const e = err as { stdout?: string; stderr?: string; message?: string }
+          output = (e.stdout ?? e.stderr ?? e.message ?? '').trim()
+          if (output.includes('no such group')) {
+            return reply.code(500).send({ error: 'Supervisor group not found. Config was written but failed to load — check supervisor logs.', details: output })
+          }
+        }
+      } else {
+        return reply.code(500).send({ error: 'Supervisor group not found. Try saving the supervisor config to reload it.', details: output })
+      }
     }
 
     // Re-fetch status so the frontend can update immediately
