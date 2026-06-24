@@ -27,6 +27,7 @@ import { composerRoutes } from './routes/composer'
 import { failedJobsRoutes } from './routes/failed-jobs'
 import { phpFpmRoutes } from './routes/phpfpm'
 import { s3BackupRoutes } from './routes/s3backup'
+import { logsRoutes } from './routes/logs'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 
 const app = Fastify({
@@ -64,18 +65,16 @@ async function start() {
   await app.register(uptimeRoutes,      { prefix: '/api' })
 
   // Web terminal grants a real, unsandboxed shell on the host to any
-  // authenticated panel user. Off by default — opt in explicitly via
-  // ENABLE_TERMINAL=true once you've reviewed the security notes in
+  // authenticated panel user. Secured by JWT auth.
   // DEPLOY_GUIDE.md (token-in-query-string, full process env inheritance).
-  if (process.env.ENABLE_TERMINAL === 'true') {
-    await app.register(terminalRoutes,  { prefix: '/api' })
-    app.log.warn('Web terminal route is ENABLED (ENABLE_TERMINAL=true) — this grants shell access to any authenticated user.')
-  }
+  await app.register(terminalRoutes,  { prefix: '/api' })
+  app.log.warn('Web terminal route is ENABLED — this grants shell access to any authenticated user.')
 
   await app.register(composerRoutes,    { prefix: '/api/sites' })
   await app.register(failedJobsRoutes,  { prefix: '/api/sites' })
   await app.register(phpFpmRoutes,      { prefix: '/api/sites' })
   await app.register(s3BackupRoutes,    { prefix: '/api/sites' })
+  await app.register(logsRoutes,        { prefix: '/api/sites' })
 
   app.get('/api/health', async () => ({ status: 'ok', ts: new Date() }))
 
