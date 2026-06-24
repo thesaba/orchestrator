@@ -7,6 +7,8 @@ import { LogTailViewer }      from '../components/LogTailViewer'
 import { ActivityLog }        from '../components/ActivityLog'
 import { SslExpiryCard }      from '../components/SslExpiryCard'
 import { UptimeCard }         from '../components/UptimeCard'
+import { UptimeCalendar }     from '../components/UptimeCalendar'
+import { EmptyState }         from '../components/EmptyState'
 
 const DEPLOY_TONE: Record<string, 'success' | 'critical' | 'info' | 'warning'> = {
   success: 'success',
@@ -71,6 +73,25 @@ export function MonitoringPage() {
         <Layout.Section variant="oneHalf">
           <SslExpiryCard />
         </Layout.Section>
+
+        {/* ── Row 2b: Uptime calendars per monitored site ─────────────── */}
+        {sites.filter((s) => s.uptimeMonitor).length === 0 ? (
+          <Layout.Section>
+            <EmptyState
+              icon="📡"
+              title="No sites being monitored"
+              body="Enable uptime monitoring on individual sites to track availability, response times, and view the 90-day uptime calendar here."
+            />
+          </Layout.Section>
+        ) : (
+          sites.filter((s) => s.uptimeMonitor).map((site) => (
+            <Layout.Section key={site.id}>
+              <Card>
+                <UptimeCalendar siteId={site.id} domain={site.domain} />
+              </Card>
+            </Layout.Section>
+          ))
+        )}
 
         {/* ── Row 3: Services — full width ────────────────────────────── */}
         <Layout.Section>
