@@ -301,3 +301,56 @@ sudo systemctl restart orchestrator-api
 - **ლოგები:** `journalctl -u orchestrator-api -f`.
 - **ბექაფი:** `scripts/backup.sh` ცალკეული საიტებისთვისაა (cron-ით პანელი თვითონ აყენებს); თვითონ Orchestrator-ის SQLite ბაზის (`apps/api/prod.db`) ბექაფიც ღირს ცალკე cron-ით (`cp` + `gzip` შესაბამის ბექაფ-დირექტორიაში).
 - **firewall:** `3001` პორტი არასოდეს გახსნი გარედან — API მხოლოდ `127.0.0.1`-ზე უსმენს და Nginx აპროქსირებს, ეს უკვე უსაფრთხო კონფიგია.
+
+## 5. ვერსია 2.0 — ახალი ფუნქციების დეპლოი (2FA, uptime monitoring, web terminal, PHP-FPM/cron editor, S3 ბექაფი და სხვ.)
+
+ეს ცვლილებები 22 commit-ად ჩავარდა `main`-ში. დროპლეტზე გადატანამდე გაითვალისწინე:
+
+### 5.1 სისტემური დამოკიდებულებები
+`node-pty` (web terminal-ისთვის) native-ად ბილდდება ინსტალაციის დროს — სჭირდება C/C++ toolchain:
+```bash
+sudo apt update && sudo apt install -y build-essential python3
+```
+დარწმუნდი, რომ `git`-ი და `composer`-ი PATH-ზეა იმ იუზერისთვის, ვისი სახელითაც მუშაობს `orchestrator-api` (ეს უკვე საჭირო იყო, ახლა მეტი route ეყრდნობა მათ — composer.ts, sites.ts-ის branch listing).
+
+### 5.2 დეპლოი
+```bash
+cd /opt/orchestrator
+git pull
+cd apps/api && pnpm install && pnpm db:push   # ახალი Prisma ველები (2FA, uptime, tags...)
+pnpm build
+cd ../web && pnpm install && pnpm build
+```
+
+### 5.3 sudoers — PHP-FPM editor და Scheduler/cron route-ებისთვის
+ეს ორი ფუნქცია წერს `/etc/php/*/fpm/pool.d/*.conf`-ში და `/etc/cron.d/*`-ში და უშვებს `systemctl reload php*-fpm`-ს — კოდი ამას აკეთებს `sudo`-ს მეშვეობით ვიწროდ განსაზღვრული ბრძანებებით (არ მოითხოვს root-ით მთლიანი სერვისის გაშვებას). თუ `orchestrator-api` `deployer` იუზერით მუშაობს (`scripts/orchestrator-api.service`-ის მიხედვით), დააყენე:
+
+```bash
+sudo visudo -f /etc/sudoers.d/deployer-fpm
+```
+და ჩასვი (ჩაანაცვლე `deployer` რეალური იუზერით, თუ სხვაა):
+```
+deployer ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /tmp/fpm-pool-*.conf /etc/php/*/fpm/pool.d/*.conf
+deployer ALL=(root) NOPASSWD: /usr/sbin/php-fpm[0-9].[0-9] -t
+deployer ALL=(root) NOPASSWD: /usr/bin/systemctl reload php[0-9].[0-9]-fpm
+deployer ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /tmp/cron-* /etc/cron.d/*
+deployer ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/cron.d/*
+```
+შემდეგ `sudo visudo -c` შეამოწმე სინტაქსი. (თუ სერვისი უკვე root-ით მუშაობს — ეს ნაბიჯი არ გჭირდება, `sudo` root-იდან root-ზე ყოველთვის გაივლის.)
+
+### 5.4 Web Terminal — გამორთულია default-ად
+`terminal.ts` route ანიჭებს ნამდვილ, შეუზღუდავ `bash` shell-ს სერვერზე ნებისმიერ ავტორიზებულ პანელის მომხმარებელს (API პროცესის სრული environment-ით — DB credentials, JWT_SECRET, ENCRYPTION_KEY ჩათვლით). ამიტომ ეს route გამორთულია, სანამ აშკარად არ ჩართავ:
+```bash
+# apps/api/.env
+ENABLE_TERMINAL=true
+```
+თითო connect/disconnect ლოგირდება audit log-ში (`terminal.connect` / `terminal.disconnect`), მაგრამ ეს მაინც ექვივალენტურია root SSH წვდომის გაცემის — ჩართე მხოლოდ თუ ნამდვილად გჭირდება და ენდობი ყველა პანელის მომხმარებელს.
+
+### 5.5 S3/R2 ბექაფი
+არ მოითხოვს `.env`-ში ცვლადებს — ყველაფერი (`access key`, `secret`, `region`, `bucket`, `endpoint`) ივსება პანელის Settings-ის UI-დან, DB-ში ინახება (`secret`-ი დაფარულია `••••••••`-ით GET-ზე). დარწმუნდი outbound HTTPS ღია გაქვს firewall-ში S3/R2 endpoint-ისთვის.
+
+### 5.6 სხვა შეახსენებები
+- Uptime monitor მონიტორავს მხოლოდ plain HTTP-ზე (port 80) — თუ საიტს მხოლოდ HTTPS აქვს ან HTTP→HTTPS redirect-ი, შესაძლოა ცდომილებით "down" დაფიქსირდეს.
+- Deploy queue ინ-memory-შია — API restart-ი queued deploy-ს ჩუმად ჩაგდებს.
+- `pnpm install`-ის შემდეგ გადაამოწმე `pnpm build` ორივე app-ზე წარმატებით ჩაირთვის (`tsc --noEmit` ლოკალურად უკვე გადამოწმდა, ცარიელი output).
+- სერვისის გადატვირთვის შემდეგ ლოგებში დაადასტურე: `journalctl -u orchestrator-api -f` — `ENABLE_TERMINAL`-ის გარეშე route არც დარეგისტრირდება, warning ჩანდება მხოლოდ თუ ჩართეთ.
