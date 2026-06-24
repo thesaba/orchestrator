@@ -261,6 +261,50 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
     return { sites: results }
   })
 
+  // ── GET /health-score/:siteId ─────────────────────────────────────────────
+  app.get('/health-score/:siteId', async (request) => {
+    const siteId = Number((request.params as { siteId: string }).siteId)
+    const site = await app.prisma.site.findUnique({
+      where: { id: siteId },
+      select: { id: true, sslEnabled: true, maintenanceMode: true, uptimeMonitor: true }
+    })
+    if (!site) return { score: 0, breakdown: {} }
+
+    // Uptime score (40pts): based on last 24h uptime checks
+    const since24h = new Date(Date.now() - 86400_000)
+    const checks = await app.prisma.uptimeCheck.findMany({
+      where: { siteId, checkedAt: { gte: since24h } },
+      select: { status: true }
+    })
+    const uptimePct = checks.length === 0 ? 1 : checks.filter(c => c.status === 'up').length / checks.length
+    const uptimeScore = Math.round(uptimePct * 40)
+
+    // Deploy score (30pts): last deployment status
+    const lastDeploy = await app.prisma.deployment.findFirst({
+      where: { siteId },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true, createdAt: true }
+    })
+    let deployScore = 15 // neutral if no deploys
+    if (lastDeploy) {
+      if (lastDeploy.status === 'success') deployScore = 30
+      else if (lastDeploy.status === 'failed') deployScore = 0
+      else deployScore = 15
+    }
+
+    // SSL score (20pts)
+    const sslScore = site.sslEnabled ? 20 : 0
+
+    // Maintenance score (10pts)
+    const maintScore = site.maintenanceMode ? 0 : 10
+
+    const total = uptimeScore + deployScore + sslScore + maintScore
+    return {
+      score: total,
+      breakdown: { uptime: uptimeScore, deploy: deployScore, ssl: sslScore, maintenance: maintScore }
+    }
+  })
+
   // ── GET /logs/:siteId/stream — SSE tail of Laravel log ──────────────────
   app.get('/logs/:siteId/stream', async (request, reply) => {
     const { siteId } = request.params as { siteId: string }

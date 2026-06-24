@@ -36,8 +36,8 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       let cmd: string
       if (action === 'down') {
         cmd = secret
-          ? `${php} "${artisan}" down --secret="${secret.replace(/"/g, '\\"')}" --render="503" 2>&1`
-          : `${php} "${artisan}" down --render="503" 2>&1`
+          ? `${php} "${artisan}" down --secret="${secret.replace(/"/g, '\\"')}" 2>&1`
+          : `${php} "${artisan}" down 2>&1`
       } else {
         cmd = `${php} "${artisan}" up 2>&1`
       }
@@ -55,8 +55,8 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
 
       return { ok: true, action, output: stdout.trim() }
     } catch (err: unknown) {
-      const msg = (err as Error).message ?? 'Command failed'
-      return reply.code(500).send({ error: msg })
+      const e = err as { stdout?: string; message?: string }
+      return reply.code(500).send({ error: (e.stdout ?? (err as Error).message ?? 'Command failed') })
     }
   })
 

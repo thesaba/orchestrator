@@ -12,6 +12,7 @@ import { api, Site, statsApi } from '../api/client'
 import { SystemStatsCard } from '../components/SystemStatsCard'
 import { ServicesCard } from '../components/ServicesCard'
 import { OnboardingWizard } from '../components/OnboardingWizard'
+import { EmptyState } from '../components/EmptyState'
 
 const DEPLOY_TONE: Record<string, 'success' | 'critical' | 'info' | 'warning'> = {
   success: 'success', failed: 'critical', running: 'info', pending: 'warning'
@@ -149,7 +150,12 @@ export function DashboardPage() {
                 <Button variant="plain" onClick={() => navigate('/sites')}>Manage →</Button>
               </InlineStack>
               {loading ? <SkeletonBodyText lines={3} /> : sites.length === 0 ? (
-                <Text as="p" tone="subdued">No sites provisioned yet.</Text>
+                <EmptyState
+                  icon="🌐"
+                  title="No sites yet"
+                  body="Add your first Laravel site to get started."
+                  action={{ label: 'Add site', onAction: () => navigate('/sites/new') }}
+                />
               ) : (
                 <BlockStack gap="200">
                   {sites.map((s) => (

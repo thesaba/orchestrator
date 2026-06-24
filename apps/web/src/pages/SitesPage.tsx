@@ -1,11 +1,14 @@
 import {
   Page, Card, ResourceList, ResourceItem, Text, Badge,
-  BlockStack, InlineStack, EmptyState, Button, Banner, Modal, TextField
+  BlockStack, InlineStack, Button, Banner, Modal, TextField
 } from '@shopify/polaris'
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, Site } from '../api/client'
 import { useToast } from '../context/toast'
+import { EmptyState } from '../components/EmptyState'
+import { ResponseSparkline } from '../components/ResponseSparkline'
+import { HealthScoreBadge } from '../components/HealthScoreBadge'
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'critical' | 'info'> = {
   success: 'success', running: 'info', pending: 'warning', failed: 'critical'
@@ -98,20 +101,20 @@ export function SitesPage() {
         </div>
       )}
 
+      {!loading && sites.length === 0 && (
+        <EmptyState
+          icon="🌐"
+          title="No sites yet"
+          body="Add your first Laravel site to start deploying. The panel will provision Nginx, PHP-FPM, and a MySQL database automatically."
+          action={{ label: 'Add first site', onAction: () => navigate('/sites/new') }}
+        />
+      )}
+
       <Card padding="0">
         {error && <div style={{ padding: 16 }}><Banner tone="critical">{error}</Banner></div>}
         <ResourceList
           loading={loading}
           items={displayed}
-          emptyState={
-            <EmptyState
-              heading="No sites yet"
-              action={{ content: 'Add your first site', onAction: () => navigate('/sites/new') }}
-              image=""
-            >
-              <p>Provision a new Laravel site to get started.</p>
-            </EmptyState>
-          }
           renderItem={(site) => {
             const tags = parseTags(site.tags)
             const lastDeploy = site.deployments[0]
@@ -135,6 +138,8 @@ export function SitesPage() {
                     </Text>
                   </BlockStack>
                   <InlineStack gap="200" align="end">
+                    <ResponseSparkline siteId={site.id} />
+                    <HealthScoreBadge siteId={site.id} />
                     {lastDeploy && (
                       <Badge tone={STATUS_TONE[lastDeploy.status] ?? 'info'}>{lastDeploy.status}</Badge>
                     )}

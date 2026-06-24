@@ -501,3 +501,49 @@ export const schedulerApi = {
     request<{ ok: boolean }>(`/sites/${siteId}/scheduler`, { method: 'DELETE' })
 }
 
+export const logsApi = {
+  list: (siteId: number, params?: { level?: string; search?: string; lines?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.level)  q.set('level', params.level)
+    if (params?.search) q.set('search', params.search)
+    if (params?.lines)  q.set('lines', String(params.lines))
+    const qs = q.toString()
+    return request<{ entries: LogEntry[]; total: number; path: string }>(`/sites/${siteId}/logs${qs ? `?${qs}` : ''}`)
+  },
+  clear: (siteId: number) => request<{ ok: boolean }>(`/sites/${siteId}/logs`, { method: 'DELETE' })
+}
+
+export interface LogEntry {
+  timestamp: string | null
+  environment: string | null
+  level: string
+  message: string
+}
+
+export const healthApi = {
+  score: (siteId: number) =>
+    request<{ score: number; breakdown: { uptime: number; deploy: number; ssl: number; maintenance: number } }>(
+      `/monitor/health-score/${siteId}`
+    )
+}
+
+export const sparklineApi = {
+  get: (siteId: number) =>
+    request<{ points: { ms: number | null; status: string; at: string }[] }>(`/uptime/${siteId}/sparkline`)
+}
+
+export const heatmapApi = {
+  get: (siteId: number) =>
+    request<{ days: Record<string, { total: number; success: number; failed: number }> }>(
+      `/sites/${siteId}/deployments/heatmap`
+    )
+}
+
+export const redeployApi = {
+  trigger: (siteId: number, deployId: number) =>
+    request<{ ok: boolean; deploymentId: number }>(
+      `/sites/${siteId}/deployments/${deployId}/redeploy`,
+      { method: 'POST' }
+    )
+}
+
