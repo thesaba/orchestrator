@@ -16,8 +16,18 @@ REPO_URL="${REPO_URL:?REPO_URL env var required}"
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
 RELEASE_DIR="$SITE_DIR/releases/$TIMESTAMP"
 SHARED_DIR="$SITE_DIR/shared"
+HOOKS_DIR="$SITE_DIR/hooks"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+run_hook() {
+  local hook_file="$HOOKS_DIR/$1"
+  if [ -f "$hook_file" ] && [ -s "$hook_file" ]; then
+    log "  Running hook: $1"
+    bash "$hook_file" || { log "  ERROR: hook $1 failed (exit $?)"; exit 1; }
+    log "  Hook $1 complete."
+  fi
+}
 
 log "=== Deploying branch '$BRANCH' to $SITE_DIR ==="
 
@@ -27,6 +37,9 @@ if [ ! -s "$SHARED_DIR/.env" ]; then
   log "       Populate it with APP_KEY, DB_* and other Laravel config before deploying."
   exit 1
 fi
+
+# ── PRE-DEPLOY HOOK ──────────────────────────────────────────────────────────
+run_hook "pre-deploy.sh"
 
 # ── 1. Clone ─────────────────────────────────────────────────────────────────
 log "[1/8] Cloning repository..."
@@ -42,10 +55,6 @@ ln -sf "$SHARED_DIR/storage" storage
 ln -sf "$SHARED_DIR/.env" .env
 
 # ── 3. Composer ──────────────────────────────────────────────────────────────
-# Note: deliberately NOT --quiet — when composer's dependency solver fails
-# (e.g. lock file out of sync, missing PHP extension), --quiet hides the
-# detailed "Problem 1 - ..." reasoning and only the generic summary line
-# survives, which makes the deploy log useless for debugging.
 log "[3/8] Installing PHP dependencies..."
 composer install \
   --no-dev \
@@ -53,11 +62,7 @@ composer install \
   --prefer-dist \
   --optimize-autoloader
 
-# ── 4. Front-end assets (Vite/Inertia, React/Vue/Blade+Vite projects) ─────────
-# Only runs if the repo actually has a JS build step. Without this, any
-# Laravel project using Vite (resources/js + vite.config.js) deploys fine but
-# crashes at runtime with "Vite manifest not found" — public/build/manifest.json
-# is only produced by `npm run build`, which composer install never touches.
+# ── 4. Front-end assets ──────────────────────────────────────────────────────
 if [ -f package.json ] && grep -q '"build"[[:space:]]*:' package.json; then
   log "[4/8] Installing JS dependencies and building front-end assets..."
   if [ -f pnpm-lock.yaml ]; then
@@ -72,11 +77,9 @@ if [ -f package.json ] && grep -q '"build"[[:space:]]*:' package.json; then
     npm ci
     npm run build
   fi
-  # node_modules is only needed to produce the build output — drop it from the
-  # release to save disk across kept releases.
   rm -rf node_modules
 else
-  log "[4/8] No JS build step detected (no package.json/build script) — skipping."
+  log "[4/8] No JS build step detected — skipping."
 fi
 
 # ── 5. Artisan caches ────────────────────────────────────────────────────────
@@ -102,6 +105,9 @@ KEPT=5
 ls -dt "$SITE_DIR/releases"/*/ 2>/dev/null | tail -n +$((KEPT + 1)) | xargs rm -rf || true
 TOTAL=$(ls -d "$SITE_DIR/releases"/*/ 2>/dev/null | wc -l | tr -d ' ')
 log "  Kept $TOTAL most recent releases (max $KEPT)"
+
+# ── POST-DEPLOY HOOK ─────────────────────────────────────────────────────────
+run_hook "post-deploy.sh"
 
 log "=== Deploy complete! ==="
 echo "__COMMIT__:${COMMIT}"

@@ -3,6 +3,7 @@ import { spawn, exec as execCb } from 'child_process'
 import { EventEmitter } from 'events'
 import { promises as fs } from 'fs'
 import { promisify } from 'util'
+import http from 'http'
 import path from 'path'
 import crypto from 'crypto'
 import { notifyDeploy } from '../lib/notify'
@@ -10,10 +11,7 @@ import { decryptSecret, encryptSecret } from '../lib/crypto'
 
 const exec = promisify(execCb)
 
-// Keyed by siteId — only one deploy runs per site at a time
-const deployEmitters = new Map<number, EventEmitter>()
-
-// Keyed by deploymentId — logs persist 30 min after completion
+const deployEmitters  = new Map<number, EventEmitter>()
 const deployLogBuffers = new Map<number, string[]>()
 
 function scriptsDir(): string {
@@ -22,10 +20,6 @@ function scriptsDir(): string {
   return path.isAbsolute(dir) ? dir : path.resolve(process.cwd(), dir)
 }
 
-// For private repos: inject the access token into the HTTPS clone URL.
-// Works for GitHub/GitLab/Bitbucket PATs ("https://<token>@host/owner/repo.git").
-// Only applied to http(s) URLs — SSH-style URLs (git@host:owner/repo.git) are left
-// untouched and rely on the host's own SSH key/agent, as before.
 function buildAuthenticatedUrl(repoUrl: string, token?: string | null): string {
   if (!token) return repoUrl
   try {
@@ -33,10 +27,41 @@ function buildAuthenticatedUrl(repoUrl: string, token?: string | null): string {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return repoUrl
     url.username = token
     return url.toString()
-  } catch {
-    return repoUrl
+  } catch { return repoUrl }
+}
+
+// Write a hook script to disk (called before runDeploy so deploy.sh can source it)
+async function writeHook(rootPath: string, name: string, content: string | null) {
+  const dir = path.join(rootPath, 'hooks')
+  const file = path.join(dir, name)
+  if (content?.trim()) {
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(file, `#!/usr/bin/env bash\nset -euo pipefail\n\n${content}\n`, { mode: 0o755 })
+  } else {
+    await fs.unlink(file).catch(() => {/* not present — ok */})
   }
 }
+
+// HTTP health check — returns true if site responds with < 500
+async function healthCheckSite(url: string, timeoutMs = 15_000): Promise<{ ok: boolean; statusCode: number | null }> {
+  return new Promise((resolve) => {
+    try {
+      const parsed = new URL(url.startsWith('http') ? url : `http://${url}`)
+      const lib = parsed.protocol === 'https:' ? require('https') : http
+      const req = lib.get(parsed.href, { timeout: timeoutMs }, (res: any) => {
+        const ok = res.statusCode < 500
+        resolve({ ok, statusCode: res.statusCode })
+        res.destroy()
+      })
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, statusCode: null }) })
+      req.on('error',   () => { resolve({ ok: false, statusCode: null }) })
+    } catch {
+      resolve({ ok: false, statusCode: null })
+    }
+  })
+}
+
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
 
 export async function runDeploy(
   app: FastifyInstance,
@@ -48,6 +73,8 @@ export async function runDeploy(
     phpVersion: string
     domain?: string
     gitToken?: string | null
+    healthCheck?: boolean
+    healthCheckUrl?: string | null
   }
 ): Promise<number> {
   if (deployEmitters.has(siteId)) {
@@ -64,24 +91,16 @@ export async function runDeploy(
   deployLogBuffers.set(deployment.id, [])
 
   const authenticatedRepoUrl = buildAuthenticatedUrl(opts.repoUrl, opts.gitToken)
+  const sanitize = (line: string) =>
+    opts.gitToken ? line.split(opts.gitToken).join('***') : line
 
   const proc = spawn(
     'bash',
     [path.join(scriptsDir(), 'deploy.sh'), opts.rootPath, opts.branch, opts.phpVersion],
-    {
-      // Pass the (possibly token-embedded) URL via env instead of argv so it
-      // never shows up in `ps`/process listings on the server.
-      env: { ...process.env, REPO_URL: authenticatedRepoUrl }
-    }
+    { env: { ...process.env, REPO_URL: authenticatedRepoUrl } }
   )
 
   let commitHash = ''
-
-  // Defense in depth: if git ever echoes the clone URL back (e.g. in a
-  // "repository not found" error), strip the token out of the stored/streamed log.
-  const sanitize = (line: string) =>
-    opts.gitToken ? line.split(opts.gitToken).join('***') : line
-
   const addLine = (raw: string) => {
     const line = sanitize(raw)
     deployLogBuffers.get(deployment.id)!.push(line)
@@ -94,7 +113,50 @@ export async function runDeploy(
   proc.stderr.on('data', (c: Buffer) => addLine(c.toString()))
 
   proc.on('close', async (code) => {
-    const status = code === 0 ? 'success' : 'failed'
+    let status: 'success' | 'failed' = code === 0 ? 'success' : 'failed'
+
+    // ── Health check after successful deploy ─────────────────────────────────
+    if (status === 'success' && opts.healthCheck) {
+      const url = opts.healthCheckUrl || `http://${opts.domain}/`
+      addLine(`\n[health] Checking ${url} (3 attempts, 5s apart)...\n`)
+
+      let passed = false
+      for (let i = 1; i <= 3; i++) {
+        if (i > 1) await sleep(5_000)
+        const result = await healthCheckSite(url)
+        addLine(`[health] Attempt ${i}: HTTP ${result.statusCode ?? 'timeout'} — ${result.ok ? 'OK' : 'FAIL'}\n`)
+        if (result.ok) { passed = true; break }
+      }
+
+      if (!passed) {
+        addLine(`\n[health] ✗ Health check failed — initiating auto-rollback...\n`)
+        status = 'failed'
+
+        // Rollback to the release that was just made (current symlink now points to it)
+        try {
+          const currentPath = path.join(opts.rootPath, 'current')
+          const releasePath = await fs.readlink(currentPath)
+          const releaseName = path.basename(releasePath)
+          // Find previous release
+          const releasesDir = path.join(opts.rootPath, 'releases')
+          const entries = (await fs.readdir(releasesDir)).sort().reverse()
+          const prevRelease = entries.find((e) => e !== releaseName)
+          if (prevRelease) {
+            const prevPath = path.join(releasesDir, prevRelease)
+            await exec(`ln -sfn "${prevPath}" "${currentPath}"`)
+            addLine(`[health] ✓ Rolled back to release ${prevRelease}\n`)
+            app.audit('deploy.health_rollback', { siteId, meta: { domain: opts.domain, release: prevRelease } })
+          } else {
+            addLine(`[health] ⚠ No previous release to roll back to\n`)
+          }
+        } catch (rbErr: unknown) {
+          addLine(`[health] ✗ Auto-rollback failed: ${(rbErr as Error).message}\n`)
+        }
+      } else {
+        addLine(`[health] ✓ Health check passed\n`)
+      }
+    }
+
     const log = deployLogBuffers.get(deployment.id)!.join('')
 
     await app.prisma.deployment.update({
@@ -102,27 +164,40 @@ export async function runDeploy(
       data: { status, log, commit: commitHash || null }
     })
 
-    // Audit log
     app.audit(`deploy.${status}`, {
       siteId,
       meta: { domain: opts.domain, branch: opts.branch, commit: commitHash || null }
     })
 
-    // Slack notification (best-effort)
     if (opts.domain) {
-      notifyDeploy(app, {
-        domain: opts.domain,
-        branch: opts.branch,
-        commit: commitHash || null,
-        status,
-        siteId
-      })
+      notifyDeploy(app, { domain: opts.domain, branch: opts.branch, commit: commitHash || null, status, siteId })
     }
 
     emitter.emit('done', status)
     deployEmitters.delete(siteId)
+    setTimeout(() => deployLogBuffers.delete(deployment.id), 30 * 60_000)
 
-    setTimeout(() => deployLogBuffers.delete(deployment.id), 30 * 60 * 1000)
+    // ── Deploy queue: kick off the queued deploy if any ──────────────────────
+    const fresh = await app.prisma.site.findUnique({ where: { id: siteId } })
+    if (fresh?.deployQueued) {
+      await app.prisma.site.update({ where: { id: siteId }, data: { deployQueued: false } })
+      setTimeout(async () => {
+        try {
+          const site = await app.prisma.site.findUnique({ where: { id: siteId } })
+          if (!site?.repoUrl) return
+          await runDeploy(app, siteId, {
+            rootPath: site.rootPath,
+            repoUrl: site.repoUrl,
+            branch: site.branch,
+            phpVersion: site.phpVersion,
+            domain: site.domain,
+            gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
+            healthCheck: site.healthCheck,
+            healthCheckUrl: site.healthCheckUrl
+          })
+        } catch { /* queued deploy failed to start — ignore */ }
+      }, 2_000)
+    }
   })
 
   return deployment.id
@@ -131,7 +206,7 @@ export async function runDeploy(
 export const deployRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
 
-  // ── POST /:id/deploy — trigger deploy ────────────────────────────────────
+  // POST /:id/deploy — trigger deploy (or queue if one is running)
   app.post('/:id/deploy', async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
 
@@ -140,6 +215,16 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     if (!site.repoUrl) return reply.code(400).send({ error: 'No repository URL configured' })
     if (site.status !== 'active') return reply.code(400).send({ error: 'Site is not active' })
 
+    // Write hook scripts before starting deploy
+    await writeHook(site.rootPath, 'pre-deploy.sh',  site.preDeploy)
+    await writeHook(site.rootPath, 'post-deploy.sh', site.postDeploy)
+
+    // If deploy already running → queue it instead of rejecting
+    if (deployEmitters.has(siteId)) {
+      await app.prisma.site.update({ where: { id: siteId }, data: { deployQueued: true } })
+      return { queued: true, message: 'Deploy queued — will start automatically after the current one finishes.' }
+    }
+
     try {
       const deploymentId = await runDeploy(app, siteId, {
         rootPath: site.rootPath,
@@ -147,7 +232,9 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         branch: site.branch,
         phpVersion: site.phpVersion,
         domain: site.domain,
-        gitToken: site.gitToken ? decryptSecret(site.gitToken) : null
+        gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
+        healthCheck: site.healthCheck,
+        healthCheckUrl: site.healthCheckUrl
       })
       return { started: true, deploymentId }
     } catch (err: unknown) {
@@ -156,7 +243,7 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     }
   })
 
-  // ── GET /:id/deploy/stream — SSE of current deploy ───────────────────────
+  // GET /:id/deploy/stream — SSE of current deploy
   app.get('/:id/deploy/stream', async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
 
@@ -177,7 +264,6 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
       if (!reply.raw.destroyed) reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
     }
 
-    // Flush buffered log lines (reconnect resilience)
     if (running) {
       for (const line of deployLogBuffers.get(running.id) ?? []) send({ line })
     }
@@ -192,21 +278,10 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         return
       }
 
-      const onLog = (line: string) => send({ line })
-      const onDone = (status: string) => {
-        send({ done: true, status })
-        reply.raw.end()
-        cleanup()
-        resolve()
-      }
-      const ka = setInterval(() => {
-        if (!reply.raw.destroyed) reply.raw.write(': ka\n\n')
-      }, 20_000)
-      const cleanup = () => {
-        emitter.off('log', onLog)
-        emitter.off('done', onDone)
-        clearInterval(ka)
-      }
+      const onLog  = (line: string) => send({ line })
+      const onDone = (status: string) => { send({ done: true, status }); reply.raw.end(); cleanup(); resolve() }
+      const ka = setInterval(() => { if (!reply.raw.destroyed) reply.raw.write(': ka\n\n') }, 20_000)
+      const cleanup = () => { emitter.off('log', onLog); emitter.off('done', onDone); clearInterval(ka) }
 
       emitter.on('log', onLog)
       emitter.on('done', onDone)
@@ -214,56 +289,65 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     })
   })
 
-  // ── PATCH /:id — update repo settings ────────────────────────────────────
+  // PATCH /:id — update repo, branch, git token, hooks, health check
   app.patch('/:id', {
     schema: {
       body: {
         type: 'object',
         properties: {
-          repoUrl:  { type: 'string', maxLength: 500 },
-          branch:   { type: 'string', minLength: 1, maxLength: 100 },
-          name:     { type: 'string', minLength: 1, maxLength: 100 },
-          // Write-only: a Personal Access Token for cloning private repos.
-          // Send '' to clear a previously saved token.
-          gitToken: { type: 'string', maxLength: 500 }
+          repoUrl:       { type: 'string', maxLength: 500 },
+          branch:        { type: 'string', minLength: 1, maxLength: 100 },
+          name:          { type: 'string', minLength: 1, maxLength: 100 },
+          gitToken:      { type: 'string', maxLength: 500 },
+          preDeploy:     { type: 'string', maxLength: 4096 },
+          postDeploy:    { type: 'string', maxLength: 4096 },
+          healthCheck:   { type: 'boolean' },
+          healthCheckUrl:{ type: 'string', maxLength: 500 }
         },
         additionalProperties: false
       }
     }
   }, async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
-    const { repoUrl, branch, name, gitToken } = request.body as {
-      repoUrl?: string
-      branch?: string
-      name?: string
-      gitToken?: string
-    }
+    const { repoUrl, branch, name, gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl } =
+      request.body as {
+        repoUrl?: string; branch?: string; name?: string; gitToken?: string
+        preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
+      }
+
     const site = await app.prisma.site.update({
       where: { id: siteId },
       data: {
-        ...(repoUrl !== undefined && { repoUrl }),
-        ...(branch !== undefined && { branch }),
-        ...(name !== undefined && { name }),
-        ...(gitToken !== undefined && { gitToken: gitToken ? encryptSecret(gitToken) : null })
+        ...(repoUrl       !== undefined && { repoUrl }),
+        ...(branch        !== undefined && { branch }),
+        ...(name          !== undefined && { name }),
+        ...(gitToken      !== undefined && { gitToken: gitToken ? encryptSecret(gitToken) : null }),
+        ...(preDeploy     !== undefined && { preDeploy }),
+        ...(postDeploy    !== undefined && { postDeploy }),
+        ...(healthCheck   !== undefined && { healthCheck }),
+        ...(healthCheckUrl !== undefined && { healthCheckUrl })
       }
     })
-    // Never echo the encrypted token back — just whether one is set.
+
+    // Write hook scripts immediately so they're on disk for the next deploy
+    if (preDeploy !== undefined || postDeploy !== undefined) {
+      await writeHook(site.rootPath, 'pre-deploy.sh',  site.preDeploy)
+      await writeHook(site.rootPath, 'post-deploy.sh', site.postDeploy)
+    }
+
     const { gitToken: _omit, ...safeSite } = site
     return { ...safeSite, hasGitToken: !!site.gitToken }
   })
 
-  // ── POST /:id/webhook-token — generate unique webhook secret ─────────────
-  app.post('/:id/webhook-token', async (request, reply) => {
+  // POST /:id/webhook-token
+  app.post('/:id/webhook-token', async (request) => {
     const siteId = Number((request.params as { id: string }).id)
     const token = crypto.randomBytes(24).toString('hex')
-    const site = await app.prisma.site.update({
-      where: { id: siteId },
-      data: { webhookToken: token }
-    })
+    const site = await app.prisma.site.update({ where: { id: siteId }, data: { webhookToken: token } })
     return { webhookToken: site.webhookToken }
   })
 
-  // ── GET /:id/releases — list on-disk releases + active symlink ────────────
+  // GET /:id/releases
   app.get('/:id/releases', async (request, reply) => {
     const site = await app.prisma.site.findUnique({
       where: { id: Number((request.params as { id: string }).id) }
@@ -271,32 +355,20 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
     const releasesDir = path.join(site.rootPath, 'releases')
-
     try {
       const entries = await fs.readdir(releasesDir)
-
-      // Resolve the current symlink to find the active release name
       let currentRelease = ''
-      try {
-        const target = await fs.readlink(path.join(site.rootPath, 'current'))
-        currentRelease = path.basename(target)
-      } catch { /* no symlink yet */ }
+      try { currentRelease = path.basename(await fs.readlink(path.join(site.rootPath, 'current'))) } catch { /* no symlink */ }
 
       const releases = (
         await Promise.all(
           entries.map(async (name) => {
             const stat = await fs.stat(path.join(releasesDir, name)).catch(() => null)
             if (!stat?.isDirectory()) return null
-            return {
-              name,
-              isCurrent: name === currentRelease,
-              createdAt: stat.birthtime.toISOString()
-            }
+            return { name, isCurrent: name === currentRelease, createdAt: stat.birthtime.toISOString() }
           })
         )
-      )
-        .filter(Boolean)
-        .sort((a, b) => b!.name.localeCompare(a!.name)) // newest first (14-digit timestamp)
+      ).filter(Boolean).sort((a, b) => b!.name.localeCompare(a!.name))
 
       return { releases, current: currentRelease }
     } catch {
@@ -304,15 +376,13 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     }
   })
 
-  // ── POST /:id/rollback — atomic symlink swap to a previous release ─────────
+  // POST /:id/rollback
   app.post('/:id/rollback', {
     schema: {
       body: {
         type: 'object',
         required: ['release'],
-        properties: {
-          release: { type: 'string', pattern: '^\\d{14}$' }
-        },
+        properties: { release: { type: 'string', pattern: '^\\d{14}$' } },
         additionalProperties: false
       }
     }
@@ -320,25 +390,15 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     const siteId = Number((request.params as { id: string }).id)
     const { release } = request.body as { release: string }
 
-    // Strict validation: only 14-digit timestamps from deploy.sh are allowed
-    if (!/^\d{14}$/.test(release)) {
-      return reply.code(400).send({ error: 'Invalid release name.' })
-    }
+    if (!/^\d{14}$/.test(release)) return reply.code(400).send({ error: 'Invalid release name.' })
 
     const site = await app.prisma.site.findUnique({ where: { id: siteId } })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
-    if (deployEmitters.has(siteId)) {
-      return reply.code(409).send({ error: 'A deploy / rollback is already running for this site.' })
-    }
+    if (deployEmitters.has(siteId)) return reply.code(409).send({ error: 'A deploy / rollback is already running.' })
 
     const releasePath = path.join(site.rootPath, 'releases', release)
-    try {
-      await fs.access(releasePath)
-    } catch {
-      return reply.code(404).send({ error: `Release ${release} not found on disk.` })
-    }
+    try { await fs.access(releasePath) } catch { return reply.code(404).send({ error: `Release ${release} not found.` }) }
 
-    // Create a deployment record to track this rollback
     const deployment = await app.prisma.deployment.create({
       data: { siteId, branch: 'rollback', commit: release, status: 'running' }
     })
@@ -349,49 +409,31 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     const buffer: string[] = []
     deployLogBuffers.set(deployment.id, buffer)
 
-    const push = (line: string) => {
-      buffer.push(line)
-      emitter.emit('log', line)
-    }
+    const push = (line: string) => { buffer.push(line); emitter.emit('log', line) }
 
-    // Run rollback asynchronously so the HTTP response returns immediately
     ;(async () => {
       const currentPath = path.join(site.rootPath, 'current')
       try {
         push(`↩  Rolling back to release ${release}…`)
-
-        // Atomic symlink swap — ln -sfn is safe on Linux (replaces in one syscall)
         await exec(`ln -sfn "${releasePath}" "${currentPath}"`)
         push(`✓  current → releases/${release}`)
-
-        // Restart queue workers so they pick up the rolled-back codebase
         try {
           await exec(`php${site.phpVersion} "${currentPath}/artisan" queue:restart --no-interaction`)
           push('✓  queue:restart signal sent')
-        } catch {
-          push('⚠  queue:restart failed (supervisor may not be running — that is okay)')
-        }
-
+        } catch { push('⚠  queue:restart failed') }
         push('Rollback complete.')
-
-        await app.prisma.deployment.update({
-          where: { id: deployment.id },
-          data: { status: 'success', log: buffer.join('\n') }
-        })
+        await app.prisma.deployment.update({ where: { id: deployment.id }, data: { status: 'success', log: buffer.join('\n') } })
         app.audit('rollback.success', { siteId, meta: { domain: site.domain, release } })
         emitter.emit('done', 'success')
       } catch (err: unknown) {
         const msg = (err as Error).message ?? 'Unknown error'
         push(`✗  Rollback failed: ${msg}`)
-        await app.prisma.deployment.update({
-          where: { id: deployment.id },
-          data: { status: 'failed', log: buffer.join('\n') }
-        })
+        await app.prisma.deployment.update({ where: { id: deployment.id }, data: { status: 'failed', log: buffer.join('\n') } })
         app.audit('rollback.failed', { siteId, meta: { domain: site.domain, release } })
         emitter.emit('done', 'failed')
       } finally {
         deployEmitters.delete(siteId)
-        setTimeout(() => deployLogBuffers.delete(deployment.id), 30 * 60 * 1000)
+        setTimeout(() => deployLogBuffers.delete(deployment.id), 30 * 60_000)
       }
     })()
 
