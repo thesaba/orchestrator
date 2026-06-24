@@ -48,6 +48,18 @@ export const uptimeRoutes: FastifyPluginAsync = async (app) => {
     return { checks, uptime24h: uptime }
   })
 
+  // GET /uptime/:siteId/sparkline — last 20 response times for mini chart
+  app.get('/uptime/:siteId/sparkline', async (request) => {
+    const siteId = Number((request.params as { siteId: string }).siteId)
+    const checks = await app.prisma.uptimeCheck.findMany({
+      where: { siteId },
+      orderBy: { checkedAt: 'desc' },
+      take: 20,
+      select: { responseMs: true, status: true, checkedAt: true }
+    })
+    return { points: checks.reverse().map(c => ({ ms: c.responseMs, status: c.status, at: c.checkedAt })) }
+  })
+
   // PATCH /uptime/:siteId — toggle monitoring on/off per site
   app.patch('/uptime/:siteId', {
     schema: {
