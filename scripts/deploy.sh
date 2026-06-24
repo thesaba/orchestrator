@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Usage: deploy.sh <site_dir> <repo_url> <branch> <php_version>
+# Usage: REPO_URL=<repo_url> deploy.sh <site_dir> <branch> <php_version>
+#
+# REPO_URL is passed via environment (not argv) so it never appears in
+# `ps`/process listings — this matters when it has a Git access token
+# embedded for private-repo clones (https://<token>@host/owner/repo.git).
 #
 # Zero-downtime deploy via symlink swap (Deployer-style).
 # Shared files (.env, storage/) are preserved across releases.
 set -euo pipefail
 
 SITE_DIR="${1:?site_dir required}"
-REPO_URL="${2:?repo_url required}"
-BRANCH="${3:-main}"
-PHP_VER="${4:-8.2}"
+BRANCH="${2:-main}"
+PHP_VER="${3:-8.2}"
+REPO_URL="${REPO_URL:?REPO_URL env var required}"
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
 RELEASE_DIR="$SITE_DIR/releases/$TIMESTAMP"
 SHARED_DIR="$SITE_DIR/shared"

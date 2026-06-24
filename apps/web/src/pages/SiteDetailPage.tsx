@@ -69,6 +69,7 @@ export function SiteDetailPage() {
   // Deploy settings (edit)
   const [repoUrl, setRepoUrl] = useState('')
   const [branch, setBranch] = useState('main')
+  const [gitToken, setGitToken] = useState('')
   const [savingRepo, setSavingRepo] = useState(false)
 
   // Delete modal
@@ -227,11 +228,33 @@ export function SiteDetailPage() {
   const handleSaveRepo = async () => {
     setSavingRepo(true)
     try {
-      await api.sites.update(siteId, { repoUrl, branch })
+      // gitToken is write-only and never sent back by the API — only include it
+      // in the update if the user actually typed something, so leaving the
+      // field blank preserves whatever token (if any) is already saved.
+      await api.sites.update(siteId, {
+        repoUrl,
+        branch,
+        ...(gitToken ? { gitToken } : {})
+      })
+      setGitToken('')
       await fetchSite()
       showToast('Deploy settings saved')
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Save failed', { error: true })
+    } finally {
+      setSavingRepo(false)
+    }
+  }
+
+  const handleClearGitToken = async () => {
+    setSavingRepo(true)
+    try {
+      await api.sites.update(siteId, { gitToken: '' })
+      setGitToken('')
+      await fetchSite()
+      showToast('Access token removed')
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Remove failed', { error: true })
     } finally {
       setSavingRepo(false)
     }
@@ -591,6 +614,23 @@ export function SiteDetailPage() {
                     onChange={setBranch}
                     autoComplete="off"
                   />
+                  <TextField
+                    label="Git Access Token (for private repos)"
+                    value={gitToken}
+                    onChange={setGitToken}
+                    type="password"
+                    autoComplete="off"
+                    placeholder={site.hasGitToken ? '•••••••• (saved — leave blank to keep)' : 'Personal Access Token, optional'}
+                    helpText="Only needed for private repositories. Stored encrypted; never displayed again after saving."
+                  />
+                  {site.hasGitToken && (
+                    <InlineStack align="start">
+                      <Badge tone="success">Token saved</Badge>
+                      <Button variant="plain" tone="critical" onClick={handleClearGitToken}>
+                        Remove token
+                      </Button>
+                    </InlineStack>
+                  )}
                   <InlineStack align="start">
                     <Button variant="primary" onClick={handleSaveRepo} loading={savingRepo}>
                       Save settings

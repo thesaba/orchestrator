@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import crypto from 'crypto'
 import { runDeploy } from './deploy'
+import { decryptSecret } from '../lib/crypto'
 
 interface GitHubPushPayload {
   ref: string
@@ -75,7 +76,8 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       rootPath: site.rootPath,
       repoUrl: site.repoUrl,
       branch: site.branch,
-      phpVersion: site.phpVersion
+      phpVersion: site.phpVersion,
+      gitToken: site.gitToken ? decryptSecret(site.gitToken) : null
     })
 
     return { triggered: true, deploymentId, commit: payload.after.slice(0, 7) }

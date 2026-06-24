@@ -43,6 +43,7 @@ export interface Site {
   repoUrl: string | null
   branch: string
   webhookToken: string | null
+  hasGitToken: boolean
   createdAt: string
   updatedAt: string
   deployments: Deployment[]
@@ -77,7 +78,7 @@ export const api = {
         `/sites/${id}${cleanup ? '?cleanup=true' : ''}`,
         { method: 'DELETE' }
       ),
-    update: (id: number, data: { repoUrl?: string; branch?: string; name?: string }) =>
+    update: (id: number, data: { repoUrl?: string; branch?: string; name?: string; gitToken?: string }) =>
       request<Site>(`/sites/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
   },
   provision: {

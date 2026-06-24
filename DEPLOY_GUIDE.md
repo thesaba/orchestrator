@@ -257,6 +257,44 @@ git pull
 cd apps/web && pnpm build
 ```
 
+## 3.2 ცნობილი პრობლემა — Bad Request / FST_ERR_CTP_EMPTY_JSON_BODY
+
+ღილაკები, რომლებიც body-ის გარეშე POST-ს გზავნიან (`Deploy Now`, SSL issue/renew, DB backup და სხვ.), 500/400 ერორზე გადიოდა, რადგან frontend ყოველთვის აყენებდა `Content-Type: application/json` header-ს, ცარიელი body-თიც. გასწორებულია `apps/web/src/api/client.ts`-ში — header მხოლოდ მაშინ ემატება, როცა body რეალურად არსებობს. `git pull` + `pnpm build` (web) დროპლეტზე საკმარისია.
+
+## 3.3 Private რეპოზიტორიების მხარდაჭერა (Git Access Token)
+
+თავიდან საერთოდ არ არსებობდა მექანიზმი private repo-ების კლონირებისთვის — `deploy.sh` უბრალოდ `git clone`-ს უშვებდა raw URL-ზე, რაც მუშაობდა მხოლოდ public repo-ებზე.
+
+**დამატებულია:**
+- `Site` მოდელს დაემატა დაშიფრული `gitToken` ველი (`apps/api/prisma/schema.prisma`) — AES-256-GCM, გასაღები `ENCRYPTION_KEY`-დან (ან `JWT_SECRET`-დან, თუ პირველი არ არის დაყენებული).
+- Deploy Settings ტაბში გაჩნდა ველი **"Git Access Token (for private repos)"** — write-only, შენახვის შემდეგ არასოდეს ჩვენდება ისევ, მხოლოდ "Token saved" ბეჯი.
+- Deploy-ის დროს ტოკენი ჩაშენდება HTTPS clone URL-ში (`https://<token>@github.com/...`), გადაეცემა `deploy.sh`-ს environment-ით (არა argv-ით, რომ `ps`-ში არ გამოჩნდეს), და დეპლოის ლოგიდან მასკირებულია.
+
+**საჭირო ნაბიჯები დროპლეტზე ამის ამოქმედებლად:**
+```bash
+cd /opt/orchestrator
+git pull
+
+# ახალი env ცვლადი (არ არის სავალდებულო, JWT_SECRET-ზე fallback-ი იმუშავებს,
+# მაგრამ რეკომენდებულია ცალკე გასაღების დაყენება)
+echo 'ENCRYPTION_KEY="'$(openssl rand -hex 32)'"' | sudo tee -a apps/api/.env
+
+cd apps/api && pnpm db:push   # ამატებს gitToken column-ს SQLite ბაზაში
+pnpm build
+cd ../web && pnpm build
+sudo systemctl restart orchestrator-api
+```
+
+**გამოყენება:** საიტის გვერდზე → Deploy Settings → ჩაწერე GitHub/GitLab Personal Access Token (repo scope) → Save settings. Public repo-ებზე ეს ველი ცარიელი დაგრჩება — არაფერი იცვლება მათთვის.
+
+## 3.4 ცნობილი პრობლემა — Deploy failed: shared/.env is empty or missing
+
+ეს არ არის ბაგი — `provision.sh` მხოლოდ ცარიელ `shared/.env` ფაილს ქმნის (`touch`), განზრახ, რადგან ბაზის პაროლი/`APP_KEY` და სხვა საიტ-სპეციფიკური მნიშვნელობები წინასწარ უცნობია. **პირველი დეპლოის წინ** აუცილებლად შეავსე:
+
+1. გადადი საიტის გვერდზე → **Config** ტაბი → **`.env`** ფაილის editor.
+2. ჩაამატე მინიმუმ: `APP_KEY` (გენერირება: `php8.2 artisan key:generate --show` ლოკალურად ან სერვერზე), `DB_DATABASE`/`DB_USERNAME`/`DB_PASSWORD` (provision-ის დროს შექმნილი მნიშვნელობები — ჩანს საიტის Database ტაბში), `APP_URL`, `APP_ENV=production`.
+3. შეინახე და მხოლოდ მერე დააჭირე **Deploy Now**.
+
 ## 4. შემდგომი მოვლა
 
 - **განახლება:** `cd /opt/orchestrator && git pull && pnpm install && pnpm build` (api-სა და web-ისთვის ცალ-ცალკე), შემდეგ `sudo systemctl restart orchestrator-api`.

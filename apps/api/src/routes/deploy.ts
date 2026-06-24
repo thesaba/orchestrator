@@ -6,6 +6,7 @@ import { promisify } from 'util'
 import path from 'path'
 import crypto from 'crypto'
 import { notifyDeploy } from '../lib/notify'
+import { decryptSecret, encryptSecret } from '../lib/crypto'
 
 const exec = promisify(execCb)
 
@@ -21,10 +22,33 @@ function scriptsDir(): string {
   return path.isAbsolute(dir) ? dir : path.resolve(process.cwd(), dir)
 }
 
+// For private repos: inject the access token into the HTTPS clone URL.
+// Works for GitHub/GitLab/Bitbucket PATs ("https://<token>@host/owner/repo.git").
+// Only applied to http(s) URLs — SSH-style URLs (git@host:owner/repo.git) are left
+// untouched and rely on the host's own SSH key/agent, as before.
+function buildAuthenticatedUrl(repoUrl: string, token?: string | null): string {
+  if (!token) return repoUrl
+  try {
+    const url = new URL(repoUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return repoUrl
+    url.username = token
+    return url.toString()
+  } catch {
+    return repoUrl
+  }
+}
+
 export async function runDeploy(
   app: FastifyInstance,
   siteId: number,
-  opts: { rootPath: string; repoUrl: string; branch: string; phpVersion: string; domain?: string }
+  opts: {
+    rootPath: string
+    repoUrl: string
+    branch: string
+    phpVersion: string
+    domain?: string
+    gitToken?: string | null
+  }
 ): Promise<number> {
   if (deployEmitters.has(siteId)) {
     throw Object.assign(new Error('Deploy already in progress'), { code: 409 })
@@ -39,20 +63,30 @@ export async function runDeploy(
   deployEmitters.set(siteId, emitter)
   deployLogBuffers.set(deployment.id, [])
 
-  const proc = spawn('bash', [
-    path.join(scriptsDir(), 'deploy.sh'),
-    opts.rootPath,
-    opts.repoUrl,
-    opts.branch,
-    opts.phpVersion
-  ])
+  const authenticatedRepoUrl = buildAuthenticatedUrl(opts.repoUrl, opts.gitToken)
+
+  const proc = spawn(
+    'bash',
+    [path.join(scriptsDir(), 'deploy.sh'), opts.rootPath, opts.branch, opts.phpVersion],
+    {
+      // Pass the (possibly token-embedded) URL via env instead of argv so it
+      // never shows up in `ps`/process listings on the server.
+      env: { ...process.env, REPO_URL: authenticatedRepoUrl }
+    }
+  )
 
   let commitHash = ''
 
+  // Defense in depth: if git ever echoes the clone URL back (e.g. in a
+  // "repository not found" error), strip the token out of the stored/streamed log.
+  const sanitize = (line: string) =>
+    opts.gitToken ? line.split(opts.gitToken).join('***') : line
+
   const addLine = (raw: string) => {
-    deployLogBuffers.get(deployment.id)!.push(raw)
-    emitter.emit('log', raw)
-    const m = raw.match(/__COMMIT__:([a-f0-9]+)/)
+    const line = sanitize(raw)
+    deployLogBuffers.get(deployment.id)!.push(line)
+    emitter.emit('log', line)
+    const m = line.match(/__COMMIT__:([a-f0-9]+)/)
     if (m) commitHash = m[1]
   }
 
@@ -112,7 +146,8 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         repoUrl: site.repoUrl,
         branch: site.branch,
         phpVersion: site.phpVersion,
-        domain: site.domain
+        domain: site.domain,
+        gitToken: site.gitToken ? decryptSecret(site.gitToken) : null
       })
       return { started: true, deploymentId }
     } catch (err: unknown) {
@@ -185,29 +220,36 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
       body: {
         type: 'object',
         properties: {
-          repoUrl: { type: 'string', maxLength: 500 },
-          branch:  { type: 'string', minLength: 1, maxLength: 100 },
-          name:    { type: 'string', minLength: 1, maxLength: 100 }
+          repoUrl:  { type: 'string', maxLength: 500 },
+          branch:   { type: 'string', minLength: 1, maxLength: 100 },
+          name:     { type: 'string', minLength: 1, maxLength: 100 },
+          // Write-only: a Personal Access Token for cloning private repos.
+          // Send '' to clear a previously saved token.
+          gitToken: { type: 'string', maxLength: 500 }
         },
         additionalProperties: false
       }
     }
   }, async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
-    const { repoUrl, branch, name } = request.body as {
+    const { repoUrl, branch, name, gitToken } = request.body as {
       repoUrl?: string
       branch?: string
       name?: string
+      gitToken?: string
     }
     const site = await app.prisma.site.update({
       where: { id: siteId },
       data: {
         ...(repoUrl !== undefined && { repoUrl }),
         ...(branch !== undefined && { branch }),
-        ...(name !== undefined && { name })
+        ...(name !== undefined && { name }),
+        ...(gitToken !== undefined && { gitToken: gitToken ? encryptSecret(gitToken) : null })
       }
     })
-    return site
+    // Never echo the encrypted token back — just whether one is set.
+    const { gitToken: _omit, ...safeSite } = site
+    return { ...safeSite, hasGitToken: !!site.gitToken }
   })
 
   // ── POST /:id/webhook-token — generate unique webhook secret ─────────────

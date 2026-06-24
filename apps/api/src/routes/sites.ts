@@ -14,13 +14,21 @@ function scriptsDir(): string {
 export const sitesRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
 
+  // Strip the encrypted gitToken column before sending a site to the client —
+  // it's write-only; the UI only needs to know whether one is set.
+  function redactGitToken<T extends { gitToken?: string | null }>(site: T) {
+    const { gitToken, ...rest } = site
+    return { ...rest, hasGitToken: !!gitToken }
+  }
+
   app.get('/', async () => {
-    return app.prisma.site.findMany({
+    const sites = await app.prisma.site.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
         deployments: { take: 1, orderBy: { createdAt: 'desc' } }
       }
     })
+    return sites.map(redactGitToken)
   })
 
   app.get('/:id', async (request, reply) => {
@@ -30,7 +38,7 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
       include: { deployments: { orderBy: { createdAt: 'desc' }, take: 20 } }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
-    return site
+    return redactGitToken(site)
   })
 
   app.post('/', {
@@ -63,7 +71,7 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     })
     app.audit('site.created', { siteId: site.id, meta: { domain, phpVersion: site.phpVersion } })
     reply.code(201)
-    return site
+    return redactGitToken(site)
   })
 
   app.delete('/:id', async (request, reply) => {
