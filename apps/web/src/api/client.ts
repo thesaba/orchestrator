@@ -44,6 +44,15 @@ export interface Site {
   branch: string
   webhookToken: string | null
   hasGitToken: boolean
+  preDeploy: string | null
+  postDeploy: string | null
+  healthCheck: boolean
+  healthCheckUrl: string | null
+  maintenanceMode: boolean
+  uptimeMonitor: boolean
+  pinned: boolean
+  tags: string   // JSON string
+  notes: string | null
   createdAt: string
   updatedAt: string
   deployments: Deployment[]
@@ -56,17 +65,25 @@ export interface Deployment {
   branch: string
   status: 'pending' | 'running' | 'success' | 'failed'
   log: string | null
+  comment?: string | null
   createdAt: string
 }
 
 export const api = {
   auth: {
-    login: (email: string, password: string) =>
-      request<{ token: string }>('/auth/login', {
+    login: (email: string, password: string, totpCode?: string) =>
+      request<{ token: string } | { requiresTOTP: true }>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password, ...(totpCode ? { totpCode } : {}) })
       }),
-    me: () => request<{ userId: number; email: string }>('/auth/me')
+    me: () => request<{ userId: number; email: string; totpEnabled: boolean }>('/auth/me'),
+    setup2fa: () => request<{ secret: string; qrDataUrl: string }>('/auth/2fa/setup'),
+    enable2fa: (totpCode: string) =>
+      request<{ ok: boolean }>('/auth/2fa/enable', {
+        method: 'POST',
+        body: JSON.stringify({ totpCode })
+      }),
+    disable2fa: () => request<{ ok: boolean }>('/auth/2fa', { method: 'DELETE' })
   },
   sites: {
     list: () => request<Site[]>('/sites'),
@@ -78,8 +95,18 @@ export const api = {
         `/sites/${id}${cleanup ? '?cleanup=true' : ''}`,
         { method: 'DELETE' }
       ),
-    update: (id: number, data: { repoUrl?: string; branch?: string; name?: string; gitToken?: string }) =>
-      request<Site>(`/sites/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+    update: (id: number, data: {
+      repoUrl?: string; branch?: string; name?: string; gitToken?: string
+      preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
+      tags?: string[]; pinned?: boolean; notes?: string
+    }) =>
+      request<Site>(`/sites/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    clone: (id: number, data: { name: string; domain: string }) =>
+      request<Site>(`/sites/${id}/clone`, { method: 'POST', body: JSON.stringify(data) }),
+    branches: (id: number) =>
+      request<{ branches: string[] }>(`/sites/${id}/branches`),
+    tags: () =>
+      request<{ tags: string[] }>('/sites/tags')
   },
   provision: {
     start: (
@@ -93,9 +120,9 @@ export const api = {
   },
   deploy: {
     trigger: (siteId: number) =>
-      request<{ started: boolean; deploymentId: number }>(`/sites/${siteId}/deploy`, {
-        method: 'POST'
-      }),
+      request<{ started: boolean; deploymentId: number } | { queued: boolean; message: string }>(
+        `/sites/${siteId}/deploy`, { method: 'POST' }
+      ),
     generateWebhookToken: (siteId: number) =>
       request<{ webhookToken: string }>(`/sites/${siteId}/webhook-token`, { method: 'POST' })
   },
@@ -339,3 +366,138 @@ export interface ServiceControlResult {
   status: 'active' | 'inactive'
   output: string
 }
+
+export interface UptimeSiteStatus {
+  siteId: number
+  domain: string
+  monitoring: boolean
+  status: 'up' | 'down' | 'unknown'
+  responseMs: number | null
+  statusCode: number | null
+  checkedAt: string | null
+}
+
+export interface SslExpiry {
+  siteId: number
+  domain: string
+  daysLeft: number | null
+  expiresAt: string | null
+  error: string | null
+}
+
+export const uptimeApi = {
+  list: () => request<{ sites: UptimeSiteStatus[] }>('/uptime'),
+  history: (siteId: number) =>
+    request<{ checks: UptimeCheck[]; uptime24h: number | null }>(`/uptime/${siteId}/history`),
+  toggle: (siteId: number, monitoring: boolean) =>
+    request<{ ok: boolean; monitoring: boolean }>(`/uptime/${siteId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ monitoring })
+    })
+}
+
+export interface UptimeCheck {
+  id: number
+  siteId: number
+  status: string
+  responseMs: number | null
+  statusCode: number | null
+  checkedAt: string
+}
+
+export const sslExpiryApi = {
+  all: () => request<{ sites: SslExpiry[] }>('/monitor/ssl')
+}
+
+export const statsApi = {
+  history: () => request<{ days: { date: string; success: number; failed: number }[] }>('/monitor/stats/history')
+}
+
+export const composerApi = {
+  outdated: (siteId: number) =>
+    request<{ packages: ComposerPackage[] }>(`/sites/${siteId}/composer/outdated`),
+  update: (siteId: number, pkg?: string) =>
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/composer/update`, {
+      method: 'POST',
+      body: JSON.stringify(pkg ? { package: pkg } : {})
+    })
+}
+
+export interface ComposerPackage {
+  name: string
+  version: string
+  latest: string
+  description?: string
+  'latest-status'?: string
+}
+
+export const failedJobsApi = {
+  list:     (siteId: number) => request<{ jobs: FailedJob[] }>(`/sites/${siteId}/failed-jobs`),
+  retry:    (siteId: number, jobId: string) =>
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/failed-jobs/${jobId}/retry`, { method: 'POST' }),
+  retryAll: (siteId: number) =>
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/failed-jobs/retry-all`, { method: 'POST' }),
+  delete:   (siteId: number, jobId: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/failed-jobs/${jobId}`, { method: 'DELETE' }),
+  flush:    (siteId: number) =>
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/failed-jobs`, { method: 'DELETE' })
+}
+
+export interface FailedJob {
+  id: string | number
+  connection: string
+  queue: string
+  payload?: string
+  exception?: string
+  failed_at: string
+  class?: string
+}
+
+export const phpFpmApi = {
+  get:  (siteId: number) => request<{ content: string; path: string; exists: boolean }>(`/sites/${siteId}/phpfpm`),
+  save: (siteId: number, content: string) =>
+    request<{ ok: boolean; reloaded: boolean; path: string }>(`/sites/${siteId}/phpfpm`, {
+      method: 'PUT',
+      body: JSON.stringify({ content })
+    })
+}
+
+export const s3Api = {
+  upload: (siteId: number, filename: string) =>
+    request<{ ok: boolean; key: string; bucket: string }>(`/sites/${siteId}/database/backup/s3/${filename}`, {
+      method: 'POST'
+    }),
+  list:   (siteId: number) =>
+    request<{ files: S3File[]; configured: boolean; bucket?: string }>(`/sites/${siteId}/database/backup/s3`),
+  delete: (siteId: number, key: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/database/backup/s3/${key}`, { method: 'DELETE' }),
+  saveSettings: (data: { s3_access_key: string; s3_secret_key: string; s3_region: string; s3_bucket: string; s3_endpoint?: string }) =>
+    request<{ ok: boolean }>('/settings', { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export interface S3File {
+  key: string
+  filename: string
+  sizeBytes: number
+  lastModified: string | null
+}
+
+export const maintenanceApi = {
+  get: (siteId: number) =>
+    request<{ maintenanceMode: boolean }>(`/sites/${siteId}/maintenance`),
+  toggle: (siteId: number, action: 'down' | 'up', secret?: string) =>
+    request<{ ok: boolean; action: string; output: string }>(
+      `/sites/${siteId}/maintenance`,
+      { method: 'POST', body: JSON.stringify({ action, ...(secret ? { secret } : {}) }) }
+    )
+}
+
+export const schedulerApi = {
+  get: (siteId: number) =>
+    request<{ active: boolean; cronPath: string; cronContent: string }>(`/sites/${siteId}/scheduler`),
+  enable: (siteId: number) =>
+    request<{ ok: boolean; cronPath: string }>(`/sites/${siteId}/scheduler`, { method: 'PUT', body: '{}' }),
+  disable: (siteId: number) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/scheduler`, { method: 'DELETE' })
+}
+
