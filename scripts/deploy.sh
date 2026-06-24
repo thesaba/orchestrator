@@ -29,14 +29,14 @@ if [ ! -s "$SHARED_DIR/.env" ]; then
 fi
 
 # ── 1. Clone ─────────────────────────────────────────────────────────────────
-log "[1/7] Cloning repository..."
+log "[1/8] Cloning repository..."
 git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$RELEASE_DIR"
 cd "$RELEASE_DIR"
 COMMIT=$(git rev-parse --short HEAD)
 log "  Commit: $COMMIT"
 
 # ── 2. Link shared files ─────────────────────────────────────────────────────
-log "[2/7] Linking shared files..."
+log "[2/8] Linking shared files..."
 rm -rf storage
 ln -sf "$SHARED_DIR/storage" storage
 ln -sf "$SHARED_DIR/.env" .env
@@ -46,30 +46,56 @@ ln -sf "$SHARED_DIR/.env" .env
 # (e.g. lock file out of sync, missing PHP extension), --quiet hides the
 # detailed "Problem 1 - ..." reasoning and only the generic summary line
 # survives, which makes the deploy log useless for debugging.
-log "[3/7] Installing PHP dependencies..."
+log "[3/8] Installing PHP dependencies..."
 composer install \
   --no-dev \
   --no-interaction \
   --prefer-dist \
   --optimize-autoloader
 
-# ── 4. Artisan caches ────────────────────────────────────────────────────────
-log "[4/7] Caching Laravel config, routes, views..."
+# ── 4. Front-end assets (Vite/Inertia, React/Vue/Blade+Vite projects) ─────────
+# Only runs if the repo actually has a JS build step. Without this, any
+# Laravel project using Vite (resources/js + vite.config.js) deploys fine but
+# crashes at runtime with "Vite manifest not found" — public/build/manifest.json
+# is only produced by `npm run build`, which composer install never touches.
+if [ -f package.json ] && grep -q '"build"[[:space:]]*:' package.json; then
+  log "[4/8] Installing JS dependencies and building front-end assets..."
+  if [ -f pnpm-lock.yaml ]; then
+    command -v pnpm >/dev/null 2>&1 || npm install -g pnpm --silent
+    pnpm install --frozen-lockfile
+    pnpm run build
+  elif [ -f yarn.lock ]; then
+    command -v yarn >/dev/null 2>&1 || npm install -g yarn --silent
+    yarn install --frozen-lockfile
+    yarn build
+  else
+    npm ci
+    npm run build
+  fi
+  # node_modules is only needed to produce the build output — drop it from the
+  # release to save disk across kept releases.
+  rm -rf node_modules
+else
+  log "[4/8] No JS build step detected (no package.json/build script) — skipping."
+fi
+
+# ── 5. Artisan caches ────────────────────────────────────────────────────────
+log "[5/8] Caching Laravel config, routes, views..."
 php${PHP_VER} artisan config:cache
 php${PHP_VER} artisan route:cache
 php${PHP_VER} artisan view:cache
 
-# ── 5. Migrations ────────────────────────────────────────────────────────────
-log "[5/7] Running migrations..."
+# ── 6. Migrations ────────────────────────────────────────────────────────────
+log "[6/8] Running migrations..."
 php${PHP_VER} artisan migrate --force
 
-# ── 6. Atomic symlink swap ───────────────────────────────────────────────────
-log "[6/7] Activating release (symlink swap)..."
+# ── 7. Atomic symlink swap ───────────────────────────────────────────────────
+log "[7/8] Activating release (symlink swap)..."
 ln -sfn "$RELEASE_DIR" "$SITE_DIR/current"
 log "  current -> $RELEASE_DIR"
 
-# ── 7. Cleanup ───────────────────────────────────────────────────────────────
-log "[7/7] Restarting queues and cleaning old releases..."
+# ── 8. Cleanup ───────────────────────────────────────────────────────────────
+log "[8/8] Restarting queues and cleaning old releases..."
 php${PHP_VER} artisan queue:restart
 
 KEPT=5
