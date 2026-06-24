@@ -1,33 +1,38 @@
 import { FastifyPluginAsync } from 'fastify'
 import bcrypt from 'bcryptjs'
 
-// Only these keys can be read or written via the API
 const ALLOWED_KEYS = new Set([
   'panel_title',
   'panel_url',
   'notify_email',
-  'deploy_slack_webhook'
+  'deploy_slack_webhook',
+  // S3/R2 backup
+  's3_access_key',
+  's3_secret_key',
+  's3_region',
+  's3_bucket',
+  's3_endpoint'
 ])
+
+// These keys have their values redacted (write-only) in GET responses
+const REDACTED_KEYS = new Set(['s3_secret_key'])
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
 
-  // ── GET /api/settings ──────────────────────────────────────────────────────
   app.get('/', async () => {
     const rows = await app.prisma.setting.findMany({
       where: { key: { in: [...ALLOWED_KEYS] } }
     })
-    return Object.fromEntries(rows.map((r) => [r.key, r.value]))
+    return Object.fromEntries(
+      rows.map((r) => [r.key, REDACTED_KEYS.has(r.key) ? (r.value ? '••••••••' : '') : r.value])
+    )
   })
 
-  // ── PUT /api/settings ──────────────────────────────────────────────────────
   app.put('/', async (request, reply) => {
     const body = request.body as Record<string, string>
-
     const allowed = Object.entries(body).filter(([k]) => ALLOWED_KEYS.has(k))
-    if (allowed.length === 0) {
-      return reply.code(400).send({ error: 'No valid settings keys provided.' })
-    }
+    if (allowed.length === 0) return reply.code(400).send({ error: 'No valid settings keys provided.' })
 
     await Promise.all(
       allowed.map(([key, value]) =>
@@ -38,11 +43,9 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         })
       )
     )
-
     return { ok: true, updated: allowed.map(([k]) => k) }
   })
 
-  // ── POST /api/settings/change-password ─────────────────────────────────────
   app.post('/change-password', {
     schema: {
       body: {
@@ -56,14 +59,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       }
     }
   }, async (request, reply) => {
-    const { oldPassword, newPassword } = request.body as {
-      oldPassword: string
-      newPassword: string
-    }
-
-    if (!newPassword || newPassword.length < 8) {
-      return reply.code(400).send({ error: 'New password must be at least 8 characters.' })
-    }
+    const { oldPassword, newPassword } = request.body as { oldPassword: string; newPassword: string }
+    if (newPassword.length < 8) return reply.code(400).send({ error: 'New password must be at least 8 characters.' })
 
     const userId = (request.user as { userId: number }).userId
     const user = await app.prisma.user.findUnique({ where: { id: userId } })
@@ -74,7 +71,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
     const hash = await bcrypt.hash(newPassword, 12)
     await app.prisma.user.update({ where: { id: userId }, data: { password: hash } })
-
     return { ok: true, message: 'Password changed successfully.' }
   })
 }
