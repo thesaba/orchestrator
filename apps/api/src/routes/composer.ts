@@ -17,9 +17,10 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
 
     const cwd = path.join(site.rootPath, 'current')
 
+    const php = `php${site.phpVersion}`
     try {
       const { stdout } = await exec(
-        `composer outdated --no-interaction --format=json --no-ansi 2>/dev/null || composer outdated --no-interaction --format=json 2>/dev/null`,
+        `${php} $(command -v composer) outdated --no-interaction --format=json --no-ansi 2>/dev/null || ${php} $(command -v composer) outdated --no-interaction --format=json 2>/dev/null`,
         { cwd, timeout: 60_000 }
       )
       const parsed = JSON.parse(stdout)
@@ -56,10 +57,11 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
 
     const { package: pkg } = (request.body ?? {}) as { package?: string }
     const cwd = path.join(site.rootPath, 'current')
+    const php = `php${site.phpVersion}`
 
     const cmd = pkg
-      ? `composer update "${pkg}" --no-interaction --no-ansi --ignore-platform-reqs -W 2>&1`
-      : `composer update --no-interaction --no-ansi --ignore-platform-reqs 2>&1`
+      ? `${php} $(command -v composer) update "${pkg}" --no-interaction --no-ansi --ignore-platform-reqs -W 2>&1`
+      : `${php} $(command -v composer) update --no-interaction --no-ansi --ignore-platform-reqs 2>&1`
 
     try {
       const { stdout } = await exec(cmd, { cwd, timeout: 300_000, env: { ...process.env, COMPOSER_ALLOW_SUPERUSER: '1' } })
@@ -79,8 +81,9 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
     const cwd = path.join(site.rootPath, 'current')
+    const php = `php${site.phpVersion}`
     try {
-      const { stdout } = await exec(`composer show --self --format=json --no-ansi 2>/dev/null`, {
+      const { stdout } = await exec(`${php} $(command -v composer) show --self --format=json --no-ansi 2>/dev/null`, {
         cwd, timeout: 15_000
       })
       const info = JSON.parse(stdout)
