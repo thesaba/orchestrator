@@ -122,13 +122,16 @@ composer --version
 ```
 თუ მომავალში დაგჭირდება სხვა PHP ვერსიაც (8.1, 8.3) — გაიმეორე იგივე `apt install php8.X-fpm ...` სტრიქონი.
 
-### ნაბიჯი 6 — Certbot, Supervisor, Git
+### ნაბიჯი 6 — Certbot, Supervisor, Git, Redis
 
 ```bash
-sudo apt install -y certbot python3-certbot-nginx supervisor git unzip
+sudo apt install -y certbot python3-certbot-nginx supervisor git unzip redis-server
 
 sudo systemctl enable --now supervisor
+sudo systemctl enable --now redis-server
 ```
+
+**Redis საჭიროა**, თუმცა ეს არც ერთ წინა ნაბიჯში არ იყო ნახსენები — პანელი თვითონ მონიტორავს `redis-server` სერვისს (Monitoring ტაბი) და ყველა ახალი საიტისთვის, რომელსაც პროვიჟენირებ, ნაგულისხმევად წერს `CACHE_DRIVER=redis`, `QUEUE_CONNECTION=redis`, `SESSION_DRIVER=redis` (`REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, პაროლის გარეშე). Ubuntu-ს default Redis კონფიგი ამ მნიშვნელობებს ემთხვევა, დამატებითი კონფიგი არ გჭირდება ერთ-დროპლეტიან სეტაპისთვის.
 
 ### ნაბიჯი 7 — პროექტის კლონირება
 
