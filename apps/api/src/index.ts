@@ -28,23 +28,6 @@ const app = Fastify({
   }
 })
 
-// Frontend's request() helper always sets Content-Type: application/json,
-// even for POSTs that send no body (e.g. deploy.trigger, ssl.issue, database.createBackup).
-// Fastify's default JSON parser rejects an empty body in that case with
-// FST_ERR_CTP_EMPTY_JSON_BODY. Treat an empty body as `{}` instead of erroring.
-app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
-  const str = body as string
-  if (!str || str.trim().length === 0) {
-    done(null, {})
-    return
-  }
-  try {
-    done(null, JSON.parse(str))
-  } catch (err) {
-    done(err as Error, undefined)
-  }
-})
-
 async function start() {
   await app.register(cors, { origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000' })
   // global: false — rate limiting is opt-in per route via config.rateLimit

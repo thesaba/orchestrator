@@ -5,7 +5,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      // Only set Content-Type when there's actually a body to send.
+      // Fastify rejects an empty body when Content-Type: application/json is present
+      // (FST_ERR_CTP_EMPTY_JSON_BODY), which broke body-less POSTs like deploy.trigger().
+      ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers
     }
