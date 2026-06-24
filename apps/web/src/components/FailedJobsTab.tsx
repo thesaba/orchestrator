@@ -126,19 +126,13 @@ export function FailedJobsTab({ siteId }: { siteId: number }) {
               {showJob.exception && (
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Exception</Text>
-                  <pre style={{
-                    background: '#0d1117', color: '#f85149', fontFamily: 'monospace', fontSize: 11,
-                    padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto'
-                  }}>{showJob.exception}</pre>
+                  <pre className="oc-terminal" style={{ maxHeight: 300, color: '#f85149' }}>{showJob.exception}</pre>
                 </BlockStack>
               )}
               {showJob.payload && (
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Payload</Text>
-                  <pre style={{
-                    background: '#0d1117', color: '#e6edf3', fontFamily: 'monospace', fontSize: 11,
-                    padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto'
-                  }}>
+                  <pre className="oc-terminal" style={{ maxHeight: 200 }}>
                     {(() => { try { return JSON.stringify(JSON.parse(showJob.payload!), null, 2) } catch { return showJob.payload } })()}
                   </pre>
                 </BlockStack>

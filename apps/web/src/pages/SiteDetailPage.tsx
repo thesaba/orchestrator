@@ -1018,8 +1018,7 @@ export function SiteDetailPage() {
         title={logModal ? `Deploy log — ${logModal.branch}@${logModal.commit ?? '?'}` : ''} size="large">
         <Modal.Section>
           {logModal?.log ? (
-            <div style={{ background: '#0d1117', color: '#e6edf3', fontFamily: 'monospace', fontSize: '12px',
-              padding: '16px', borderRadius: '6px', whiteSpace: 'pre-wrap', maxHeight: '60vh', overflowY: 'auto' }}>
+            <div className="oc-terminal" style={{ maxHeight: '60vh' }}>
               {logModal.log}
             </div>
           ) : (
@@ -1054,7 +1053,7 @@ export function SiteDetailPage() {
             <Text as="p">Removes the site from the Orchestrator database.</Text>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
               <input type="checkbox" id="cleanup-server" checked={cleanupServer}
-                onChange={(e) => setCleanupServer(e.target.checked)} style={{ marginTop: 2, accentColor: '#e01e5a' }} />
+                onChange={(e) => setCleanupServer(e.target.checked)} style={{ marginTop: 2, accentColor: 'var(--oc-remove-color)' }} />
               <label htmlFor="cleanup-server" style={{ cursor: 'pointer' }}>
                 <Text as="span" variant="bodyMd" fontWeight="semibold">Also remove from server</Text>
                 <Text as="p" variant="bodySm" tone="subdued">

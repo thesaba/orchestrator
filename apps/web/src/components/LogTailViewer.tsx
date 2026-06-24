@@ -111,17 +111,8 @@ export function LogTailViewer({ sites }: Props) {
 
       {siteId && (
         <div
-          style={{
-            background: '#0d1117',
-            borderRadius: '8px',
-            border: '1px solid #21262d',
-            height: '480px',
-            overflowY: 'auto',
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            fontSize: '12px',
-            lineHeight: '1.7',
-            padding: '12px 16px'
-          }}
+          className="oc-terminal"
+          style={{ height: '480px', lineHeight: '1.7', overflowY: 'auto' }}
         >
           {!connected && (
             <Text as="p" tone="subdued">
@@ -142,15 +133,8 @@ export function LogTailViewer({ sites }: Props) {
 
       {!siteId && (
         <div
-          style={{
-            background: '#0d1117',
-            borderRadius: '8px',
-            border: '1px solid #21262d',
-            height: '200px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
+          className="oc-terminal"
+          style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <Text as="p" tone="subdued">
             Select an active site to start tailing its Laravel log

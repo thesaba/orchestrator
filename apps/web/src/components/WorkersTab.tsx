@@ -233,18 +233,7 @@ export function WorkersTab({ siteId, phpVersion }: Props) {
         )}
 
         {cronExpected && (
-          <div
-            style={{
-              background: '#0d1117',
-              border: '1px solid #30363d',
-              borderRadius: '6px',
-              padding: '12px 16px',
-              fontFamily: 'monospace',
-              fontSize: '12px',
-              color: '#e6edf3',
-              whiteSpace: 'pre'
-            }}
-          >
+          <div className="oc-terminal" style={{ whiteSpace: 'pre' }}>
             {cronExpected}
           </div>
         )}

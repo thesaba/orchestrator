@@ -21,11 +21,11 @@ export function DeployTimeline({ deployments }: Props) {
       <div style={{
         position: 'absolute', left: DOT_SIZE / 2 - 1, top: 8,
         width: 2, height: `calc(100% - 16px)`,
-        background: 'var(--p-color-border, #e1e3e5)'
+        background: 'var(--oc-border)'
       }} />
 
       {deployments.slice(0, 10).map((d, i) => {
-        const color = TONE[d.status] ?? '#8c9196'
+        const color = TONE[d.status] ?? 'var(--oc-text-subdued)'
         const date  = new Date(d.createdAt)
         return (
           <div key={d.id} style={{ display: 'flex', gap: 16, marginBottom: i < deployments.length - 1 ? 20 : 0, position: 'relative' }}>

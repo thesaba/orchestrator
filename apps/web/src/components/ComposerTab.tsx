@@ -68,7 +68,7 @@ export function ComposerTab({ siteId }: { siteId: number }) {
               rows={filtered.map((p) => [
                 <Text as="span" variant="bodySm" fontWeight="semibold">{p.name}</Text>,
                 <code style={{ fontSize: 12 }}>{p.version}</code>,
-                <code style={{ fontSize: 12, color: '#47c1bf' }}>{p.latest}</code>,
+                <code style={{ fontSize: 12, color: 'var(--oc-accent)' }}>{p.latest}</code>,
                 <Badge tone={p['latest-status'] === 'up-to-date' ? 'success' : 'warning'}>
                   {p['latest-status'] ?? 'outdated'}
                 </Badge>,
@@ -84,10 +84,7 @@ export function ComposerTab({ siteId }: { siteId: number }) {
       {output && (
         <BlockStack gap="200">
           <Text as="h3" variant="headingSm">Output</Text>
-          <pre style={{
-            background: '#0d1117', color: '#e6edf3', fontFamily: 'monospace', fontSize: 12,
-            padding: 16, borderRadius: 6, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto'
-          }}>{output}</pre>
+          <pre className="oc-terminal" style={{ maxHeight: 300 }}>{output}</pre>
         </BlockStack>
       )}
     </BlockStack>

@@ -108,7 +108,7 @@ export function ActivityLog({ sites }: Props) {
                   alignItems: 'flex-start',
                   gap: 12,
                   padding: '10px 4px',
-                  borderBottom: i < logs.length - 1 ? '1px solid #e1e3e5' : 'none'
+                  borderBottom: i < logs.length - 1 ? '1px solid var(--oc-border)' : 'none'
                 }}
               >
                 <span style={{ fontSize: 16, lineHeight: 1.4, flexShrink: 0 }}>{icon}</span>

@@ -70,7 +70,7 @@ export function OnboardingWizard() {
             {STEPS.map((_, i) => (
               <div key={i} style={{
                 width: 8, height: 8, borderRadius: '50%', cursor: 'pointer',
-                background: i === step ? '#458fff' : '#c9cccf',
+                background: i === step ? 'var(--oc-accent)' : 'var(--oc-border-input)',
                 transition: 'background 0.2s'
               }} onClick={() => setStep(i)} />
             ))}
