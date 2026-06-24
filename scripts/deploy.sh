@@ -55,8 +55,13 @@ ln -sf "$SHARED_DIR/storage" storage
 ln -sf "$SHARED_DIR/.env" .env
 
 # ── 3. Composer ──────────────────────────────────────────────────────────────
+# Run composer through the site's configured PHP binary explicitly — the bare
+# `composer` command uses whatever `php` resolves to on PATH (the system
+# default CLI version), which can silently diverge from $PHP_VER and break
+# platform-requirement checks (e.g. composer.lock pinned to packages that
+# don't support the newer default PHP).
 log "[3/8] Installing PHP dependencies..."
-composer install \
+php${PHP_VER} "$(command -v composer)" install \
   --no-dev \
   --no-interaction \
   --prefer-dist \
