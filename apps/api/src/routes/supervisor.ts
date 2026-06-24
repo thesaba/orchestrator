@@ -45,6 +45,11 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     const { content } = request.body as { content: string }
     const configPath = `/etc/supervisor/conf.d/${site.domain}-worker.conf`
 
+    // supervisord refuses to (re)read a config whose stdout_logfile directory
+    // doesn't exist yet (CANT_REREAD). Sites provisioned before shared/logs
+    // was added to provision.sh won't have it — create it defensively here.
+    await fs.mkdir(`${site.rootPath}/shared/logs`, { recursive: true }).catch(() => {})
+
     await fs.writeFile(configPath, content, 'utf-8')
 
     try {
@@ -111,6 +116,7 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     if (action === 'start') {
       const configExists = await fs.access(configPath).catch(() => null)
       if (configExists === null) {
+        await fs.mkdir(`${site.rootPath}/shared/logs`, { recursive: true }).catch(() => {})
         await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
         await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
       }
@@ -129,6 +135,7 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     if (!ok && output.includes('no such group')) {
       const configExists = await fs.access(configPath).catch(() => null)
       if (configExists === null) {
+        await fs.mkdir(`${site.rootPath}/shared/logs`, { recursive: true }).catch(() => {})
         await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
         await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
         try {
