@@ -8,37 +8,63 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  password    String
+  totpSecret  String?
+  totpEnabled Boolean  @default(false)
+  createdAt   DateTime @default(now())
 }
 
 model Site {
-  id          Int          @id @default(autoincrement())
-  name        String
-  domain      String       @unique
-  phpVersion  String       @default("8.2")
-  dbName      String?
-  dbUser      String?
-  sslEnabled    Boolean      @default(false)
-  rootPath      String
-  status        String       @default("pending")
-  repoUrl       String?
-  branch        String       @default("main")
-  webhookToken  String?      @unique
-  gitToken      String?      // encrypted (AES-256-GCM) — Personal Access Token for private repo clones
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  deployments Deployment[]
+  id              Int           @id @default(autoincrement())
+  name            String
+  domain          String        @unique
+  phpVersion      String        @default("8.2")
+  dbName          String?
+  dbUser          String?
+  sslEnabled      Boolean       @default(false)
+  rootPath        String
+  status          String        @default("pending")
+  repoUrl         String?
+  branch          String        @default("main")
+  webhookToken    String?       @unique
+  gitToken        String?
+  preDeploy       String?
+  postDeploy      String?
+  healthCheck     Boolean       @default(false)
+  healthCheckUrl  String?
+  deployQueued    Boolean       @default(false)
+  maintenanceMode Boolean       @default(false)
+  uptimeMonitor   Boolean       @default(true)
+  // New fields
+  pinned          Boolean       @default(false)
+  tags            String        @default("[]")  // JSON string array
+  notes           String?                        // free-form notes
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deployments     Deployment[]
+  uptimeChecks    UptimeCheck[]
+}
+
+model UptimeCheck {
+  id          Int      @id @default(autoincrement())
+  siteId      Int
+  site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  status      String
+  responseMs  Int?
+  statusCode  Int?
+  checkedAt   DateTime @default(now())
+
+  @@index([siteId, checkedAt])
 }
 
 model AuditLog {
   id        Int      @id @default(autoincrement())
-  action    String   // "deploy.success", "site.created", "rollback.failed", …
+  action    String
   siteId    Int?
   userId    Int?
-  meta      String?  // JSON blob
+  meta      String?
   createdAt DateTime @default(now())
 }
 
@@ -56,5 +82,6 @@ model Deployment {
   branch    String   @default("main")
   status    String   @default("pending")
   log       String?
+  comment   String?  // user-provided deploy comment
   createdAt DateTime @default(now())
 }
