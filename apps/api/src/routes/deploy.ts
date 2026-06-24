@@ -289,7 +289,10 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     })
   })
 
-  // PATCH /:id — update repo, branch, git token, hooks, health check
+  // PATCH /:id — update repo, branch, git token, hooks, health check, and
+  // site metadata (tags/pinned/notes — merged in here because Fastify
+  // doesn't allow two plugins registering the same method+path under the
+  // same prefix; this used to also live in sites.ts as a separate handler).
   app.patch('/:id', {
     schema: {
       body: {
@@ -302,17 +305,21 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
           preDeploy:     { type: 'string', maxLength: 4096 },
           postDeploy:    { type: 'string', maxLength: 4096 },
           healthCheck:   { type: 'boolean' },
-          healthCheckUrl:{ type: 'string', maxLength: 500 }
+          healthCheckUrl:{ type: 'string', maxLength: 500 },
+          tags:          { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
+          pinned:        { type: 'boolean' },
+          notes:         { type: 'string', maxLength: 2000 }
         },
         additionalProperties: false
       }
     }
   }, async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
-    const { repoUrl, branch, name, gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl } =
+    const { repoUrl, branch, name, gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl, tags, pinned, notes } =
       request.body as {
         repoUrl?: string; branch?: string; name?: string; gitToken?: string
         preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
+        tags?: string[]; pinned?: boolean; notes?: string
       }
 
     const site = await app.prisma.site.update({
@@ -325,7 +332,10 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         ...(preDeploy     !== undefined && { preDeploy }),
         ...(postDeploy    !== undefined && { postDeploy }),
         ...(healthCheck   !== undefined && { healthCheck }),
-        ...(healthCheckUrl !== undefined && { healthCheckUrl })
+        ...(healthCheckUrl !== undefined && { healthCheckUrl }),
+        ...(tags          !== undefined && { tags: JSON.stringify(tags) }),
+        ...(pinned        !== undefined && { pinned }),
+        ...(notes         !== undefined && { notes })
       }
     })
 

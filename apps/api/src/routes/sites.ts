@@ -115,37 +115,10 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     return redactGitToken(clone)
   })
 
-  // PATCH /:id — update tags, pinned, notes, etc.
-  app.patch('/:id', {
-    schema: {
-      body: {
-        type: 'object',
-        properties: {
-          name:    { type: 'string', minLength: 1, maxLength: 100 },
-          tags:    { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
-          pinned:  { type: 'boolean' },
-          notes:   { type: 'string', maxLength: 2000 }
-        },
-        additionalProperties: false
-      }
-    }
-  }, async (request, reply) => {
-    const siteId = Number((request.params as { id: string }).id)
-    const { name, tags, pinned, notes } = request.body as {
-      name?: string; tags?: string[]; pinned?: boolean; notes?: string
-    }
-
-    const site = await app.prisma.site.update({
-      where: { id: siteId },
-      data: {
-        ...(name    !== undefined && { name }),
-        ...(tags    !== undefined && { tags: JSON.stringify(tags) }),
-        ...(pinned  !== undefined && { pinned }),
-        ...(notes   !== undefined && { notes })
-      }
-    })
-    return redactGitToken(site)
-  })
+  // NOTE: PATCH /:id (tags/pinned/notes/repo/hooks/etc.) lives in deploy.ts —
+  // both this file and deploy.ts are registered under the same '/api/sites'
+  // prefix, and Fastify doesn't allow two plugins to declare the same
+  // method+path under one prefix (FST_ERR_DUPLICATED_ROUTE).
 
   app.delete('/:id', async (request, reply) => {
     const { id } = request.params as { id: string }
