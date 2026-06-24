@@ -21,7 +21,7 @@ import {
 } from '@shopify/polaris'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, ArtisanCommand, BackupFile, Deployment, Release, Site, maintenanceApi } from '../api/client'
+import { api, ArtisanCommand, BackupFile, Deployment, Release, Site, maintenanceApi, logsApi, redeployApi } from '../api/client'
 import { ProvisionLog }      from '../components/ProvisionLog'
 import { ConfigEditor }      from '../components/ConfigEditor'
 import { WorkersTab }        from '../components/WorkersTab'
@@ -33,6 +33,10 @@ import { FailedJobsTab }     from '../components/FailedJobsTab'
 import { PhpFpmTab }         from '../components/PhpFpmTab'
 import { EnvEditorTab }      from '../components/EnvEditorTab'
 import { DeployTimeline }    from '../components/DeployTimeline'
+import { LaravelLogsTab }    from '../components/LaravelLogsTab'
+import { DeployHeatmap }     from '../components/DeployHeatmap'
+import { HealthScoreBadge }  from '../components/HealthScoreBadge'
+import { Breadcrumb }        from '../components/Breadcrumb'
 import { useToast } from '../context/toast'
 
 const DESTRUCTIVE_ARTISAN = new Set([
@@ -124,6 +128,12 @@ export function SiteDetailPage() {
   // Panel URL for webhook display
   const [panelUrl, setPanelUrl] = useState('')
 
+  // Anomaly detection
+  const [hasErrorSpike, setHasErrorSpike] = useState(false)
+
+  // Redeploy loading state (tracks deployment id being redeployed)
+  const [redeploying, setRedeploying] = useState<number | null>(null)
+
   // Config tab state
   const [nginxContent, setNginxContent] = useState('')
   const [nginxPath, setNginxPath]       = useState('')
@@ -161,8 +171,16 @@ export function SiteDetailPage() {
 
   useEffect(() => { fetchSite() }, [siteId]) // eslint-disable-line
 
+  // Anomaly detection: check for error spike after site loads
+  useEffect(() => {
+    if (!siteId) return
+    logsApi.list(siteId, { level: 'error', lines: 50 })
+      .then((r) => { if (r.entries.length > 10) setHasErrorSpike(true) })
+      .catch(() => {})
+  }, [siteId])
+
   // Tab index constants (easier to maintain)
-  const TAB = { DEPLOYS: 0, SETTINGS: 1, CONFIG: 2, ENV: 3, DATABASE: 4, ARTISAN: 5, WORKERS: 6, SSL: 7, MAINTENANCE: 8, COMPOSER: 9, FAILED_JOBS: 10, PHPFPM: 11, TERMINAL: 12, PROVISION: 13 }
+  const TAB = { DEPLOYS: 0, SETTINGS: 1, CONFIG: 2, ENV: 3, DATABASE: 4, ARTISAN: 5, WORKERS: 6, SSL: 7, MAINTENANCE: 8, COMPOSER: 9, FAILED_JOBS: 10, PHPFPM: 11, TERMINAL: 12, PROVISION: 13, LOGS: 14 }
 
   // Load Deploy Settings tab data
   useEffect(() => {
@@ -240,6 +258,17 @@ export function SiteDetailPage() {
     setDeployResult(status === 'success' ? 'success' : 'failed')
     fetchSite(); loadReleases()
   }, [fetchSite, loadReleases])
+
+  const handleRedeploy = async (deploymentId: number) => {
+    setRedeploying(deploymentId)
+    try {
+      await redeployApi.trigger(siteId, deploymentId)
+      setDeploying(true)
+      await fetchSite()
+    } catch (err: unknown) {
+      setDeployError(err instanceof Error ? err.message : 'Redeploy failed')
+    } finally { setRedeploying(null) }
+  }
 
   const handleSaveRepo = async () => {
     setSavingRepo(true)
@@ -424,7 +453,13 @@ export function SiteDetailPage() {
     d.branch,
     d.commit ?? '—',
     new Date(d.createdAt).toLocaleString(),
-    d.log ? <Button size="micro" onClick={() => setLogModal(d)}>View log</Button> : null
+    d.log ? <Button size="micro" onClick={() => setLogModal(d)}>View log</Button> : null,
+    <Button
+      size="micro"
+      loading={redeploying === d.id}
+      disabled={deploying || redeploying !== null}
+      onClick={() => handleRedeploy(d.id)}
+    >↺ Redeploy</Button>
   ])
 
   return (
@@ -444,12 +479,19 @@ export function SiteDetailPage() {
     >
       <BlockStack gap="500">
 
+        {/* ── Breadcrumb ────────────────────────────────────────────────── */}
+        <Breadcrumb items={[{ label: 'Sites', url: '/sites' }, { label: site.domain }]} />
+
         {/* ── Status bar ─────────────────────────────────────────────────── */}
         <Card>
           <InlineStack gap="400" wrap>
             <BlockStack gap="100">
               <Text as="p" variant="bodySm" tone="subdued">Status</Text>
               <Badge tone={STATUS_TONE[site.status] ?? 'info'}>{site.status}</Badge>
+            </BlockStack>
+            <BlockStack gap="100">
+              <Text as="p" variant="bodySm" tone="subdued">Health</Text>
+              <HealthScoreBadge siteId={siteId} />
             </BlockStack>
             {maintenanceMode && (
               <BlockStack gap="100">
@@ -487,6 +529,12 @@ export function SiteDetailPage() {
 
         {deployError && <Banner tone="critical" onDismiss={() => setDeployError('')}>{deployError}</Banner>}
 
+        {hasErrorSpike && (
+          <Banner tone="warning" onDismiss={() => setHasErrorSpike(false)}>
+            ⚠️ Anomaly detected: high error rate in Laravel logs. Check the Logs tab.
+          </Banner>
+        )}
+
         {deployResult && deployResult !== 'queued' && (
           <Banner tone={deployResult === 'success' ? 'success' : 'critical'} onDismiss={() => setDeployResult(null)}>
             {deployResult === 'success' ? 'Deploy completed successfully!' : 'Deploy failed — check the log above for details.'}
@@ -509,7 +557,8 @@ export function SiteDetailPage() {
             { id: 'failed-jobs',  content: 'Failed Jobs' },
             { id: 'phpfpm',       content: 'PHP-FPM' },
             { id: 'terminal',     content: 'Terminal' },
-            { id: 'provision',    content: 'Provision Log' }
+            { id: 'provision',    content: 'Provision Log' },
+            { id: 'logs',         content: 'Laravel Logs' }
           ]}
           selected={tab}
           onSelect={setTab}
@@ -526,12 +575,18 @@ export function SiteDetailPage() {
                   </BlockStack>
                 </Card>
               )}
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingSm">Deploy Activity</Text>
+                  <DeployHeatmap siteId={siteId} />
+                </BlockStack>
+              </Card>
               <Card padding="0">
                 {deployRows.length > 0 ? (
                   <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     <DataTable
-                      columnContentTypes={['text', 'text', 'text', 'text', 'text']}
-                      headings={['Status', 'Branch', 'Commit', 'Started', 'Log']}
+                      columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text']}
+                      headings={['Status', 'Branch', 'Commit', 'Started', 'Log', 'Action']}
                       rows={deployRows}
                     />
                   </div>
@@ -1007,6 +1062,13 @@ export function SiteDetailPage() {
                   Provision status: <strong>{site.status}</strong>
                 </Banner>
               )}
+            </Card>
+          )}
+
+          {/* Tab 14 — Laravel Logs */}
+          {tab === TAB.LOGS && (
+            <Card>
+              <LaravelLogsTab siteId={siteId} />
             </Card>
           )}
 
