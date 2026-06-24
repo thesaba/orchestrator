@@ -1,10 +1,12 @@
 import { Page, Layout, Card, BlockStack, Text, DataTable, Badge } from '@shopify/polaris'
 import { useCallback, useEffect, useState } from 'react'
 import { api, Site, ServiceStatus } from '../api/client'
-import { SystemStatsCard } from '../components/SystemStatsCard'
+import { SystemStatsCard }    from '../components/SystemStatsCard'
 import { ServiceControlCard } from '../components/ServiceControlCard'
-import { LogTailViewer } from '../components/LogTailViewer'
-import { ActivityLog } from '../components/ActivityLog'
+import { LogTailViewer }      from '../components/LogTailViewer'
+import { ActivityLog }        from '../components/ActivityLog'
+import { SslExpiryCard }      from '../components/SslExpiryCard'
+import { UptimeCard }         from '../components/UptimeCard'
 
 const DEPLOY_TONE: Record<string, 'success' | 'critical' | 'info' | 'warning'> = {
   success: 'success',
@@ -14,7 +16,7 @@ const DEPLOY_TONE: Record<string, 'success' | 'critical' | 'info' | 'warning'> =
 }
 
 export function MonitoringPage() {
-  const [sites, setSites] = useState<Site[]>([])
+  const [sites, setSites]       = useState<Site[]>([])
   const [services, setServices] = useState<ServiceStatus[]>([])
 
   useEffect(() => {
@@ -46,18 +48,12 @@ export function MonitoringPage() {
               <Text as="h2" variant="headingMd">Sites</Text>
               <BlockStack gap="200">
                 {[
-                  { label: 'Total', value: sites.length },
-                  { label: 'Active', value: sites.filter((s) => s.status === 'active').length },
-                  { label: 'SSL enabled', value: sites.filter((s) => s.sslEnabled).length },
-                  {
-                    label: 'Pending / Error',
-                    value: sites.filter((s) => ['pending', 'error'].includes(s.status)).length
-                  }
+                  { label: 'Total',           value: sites.length },
+                  { label: 'Active',          value: sites.filter((s) => s.status === 'active').length },
+                  { label: 'SSL enabled',     value: sites.filter((s) => s.sslEnabled).length },
+                  { label: 'Pending / Error', value: sites.filter((s) => ['pending', 'error'].includes(s.status)).length }
                 ].map(({ label, value }) => (
-                  <div
-                    key={label}
-                    style={{ display: 'flex', justifyContent: 'space-between' }}
-                  >
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Text as="p" variant="bodySm" tone="subdued">{label}</Text>
                     <Text as="p" variant="bodyMd" fontWeight="semibold">{value}</Text>
                   </div>
@@ -67,18 +63,25 @@ export function MonitoringPage() {
           </Card>
         </Layout.Section>
 
-        {/* ── Row 2: Services — full width so controls have space ──────── */}
+        {/* ── Row 2: Uptime monitor + SSL expiry ──────────────────────── */}
+        <Layout.Section variant="oneHalf">
+          <UptimeCard />
+        </Layout.Section>
+
+        <Layout.Section variant="oneHalf">
+          <SslExpiryCard />
+        </Layout.Section>
+
+        {/* ── Row 3: Services — full width ────────────────────────────── */}
         <Layout.Section>
           <ServiceControlCard services={services} onRefresh={refreshServices} />
         </Layout.Section>
 
-        {/* ── Row 3: Recent deployments ────────────────────────────────── */}
+        {/* ── Row 4: Recent deployments ────────────────────────────────── */}
         <Layout.Section>
           <Card padding="0">
             <div style={{ padding: '16px 20px 8px' }}>
-              <Text as="h2" variant="headingMd">
-                Recent Deployments
-              </Text>
+              <Text as="h2" variant="headingMd">Recent Deployments</Text>
             </div>
             {recentDeploys.length > 0 ? (
               <DataTable
@@ -94,27 +97,23 @@ export function MonitoringPage() {
               />
             ) : (
               <div style={{ padding: '24px', textAlign: 'center' }}>
-                <Text as="p" tone="subdued">
-                  No deployments yet.
-                </Text>
+                <Text as="p" tone="subdued">No deployments yet.</Text>
               </div>
             )}
           </Card>
         </Layout.Section>
 
-        {/* ── Row 3: Log tail ──────────────────────────────────────────── */}
+        {/* ── Row 5: Log tail ──────────────────────────────────────────── */}
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Laravel Log — Live Tail
-              </Text>
+              <Text as="h2" variant="headingMd">Laravel Log — Live Tail</Text>
               <LogTailViewer sites={sites} />
             </BlockStack>
           </Card>
         </Layout.Section>
 
-        {/* ── Row 4: Audit / Activity log ──────────────────────────────── */}
+        {/* ── Row 6: Audit / Activity log ──────────────────────────────── */}
         <Layout.Section>
           <Card>
             <ActivityLog sites={sites} />

@@ -12,7 +12,8 @@ import {
   Badge
 } from '@shopify/polaris'
 import { useEffect, useState } from 'react'
-import { api, PanelSettings } from '../api/client'
+import { api, PanelSettings, s3Api } from '../api/client'
+import { useToast } from '../context/toast'
 
 const EMPTY: PanelSettings = {
   panel_title: '',
@@ -22,28 +23,64 @@ const EMPTY: PanelSettings = {
 }
 
 export function SettingsPage() {
-  const [settings, setSettings] = useState<PanelSettings>(EMPTY)
-  const [loading, setLoading] = useState(true)
+  const showToast = useToast()
+  const [settings,    setSettings]    = useState<PanelSettings>(EMPTY)
+  const [loading,     setLoading]     = useState(true)
   const [savingGeneral, setSavingGeneral] = useState(false)
-  const [generalResult, setGeneralResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
-  const [oldPassword, setOldPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
+  const [oldPassword,     setOldPassword]     = useState('')
+  const [newPassword,     setNewPassword]     = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [savingPwd, setSavingPwd] = useState(false)
-  const [pwdResult, setPwdResult] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [savingPwd,       setSavingPwd]       = useState(false)
+  const [pwdResult,       setPwdResult]       = useState<{ ok: boolean; msg: string } | null>(null)
+
+  // 2FA state
+  const [totpEnabled,    setTotpEnabled]    = useState(false)
+  const [qrDataUrl,      setQrDataUrl]      = useState<string | null>(null)
+  const [totpSecret,     setTotpSecret]     = useState('')
+  const [totpCode,       setTotpCode]       = useState('')
+  const [totpLoading,    setTotpLoading]    = useState(false)
+  const [totpError,      setTotpError]      = useState<string | null>(null)
+  const [setupStep,      setSetupStep]      = useState<'idle' | 'scan' | 'verify'>('idle')
+
+  // S3/R2 state
+  const [s3AccessKey,  setS3AccessKey]  = useState('')
+  const [s3SecretKey,  setS3SecretKey]  = useState('')
+  const [s3Region,     setS3Region]     = useState('auto')
+  const [s3Bucket,     setS3Bucket]     = useState('')
+  const [s3Endpoint,   setS3Endpoint]   = useState('')
+  const [savingS3,     setSavingS3]     = useState(false)
+
+  const saveS3 = async () => {
+    setSavingS3(true)
+    try {
+      await s3Api.saveSettings({
+        s3_access_key: s3AccessKey,
+        s3_secret_key: s3SecretKey,
+        s3_region: s3Region,
+        s3_bucket: s3Bucket,
+        ...(s3Endpoint ? { s3_endpoint: s3Endpoint } : {})
+      })
+      showToast('S3/R2 settings saved')
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Save failed', { error: true })
+    } finally { setSavingS3(false) }
+  }
 
   useEffect(() => {
-    api.settings
-      .get()
-      .then(setSettings)
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    api.settings.get().then((s) => {
+      setSettings(s)
+      // Pre-fill non-sensitive S3 fields (secret is redacted by API)
+      if ((s as any).s3_access_key) setS3AccessKey((s as any).s3_access_key)
+      if ((s as any).s3_region)     setS3Region((s as any).s3_region)
+      if ((s as any).s3_bucket)     setS3Bucket((s as any).s3_bucket)
+      if ((s as any).s3_endpoint)   setS3Endpoint((s as any).s3_endpoint)
+    }).catch(() => {}).finally(() => setLoading(false))
+    api.auth.me().then((u) => setTotpEnabled(u?.totpEnabled ?? false)).catch(() => {})
   }, [])
 
   const handleSaveGeneral = async () => {
     setSavingGeneral(true)
-    setGeneralResult(null)
     try {
       await api.settings.update({
         panel_title: settings.panel_title,
@@ -51,9 +88,9 @@ export function SettingsPage() {
         notify_email: settings.notify_email,
         deploy_slack_webhook: settings.deploy_slack_webhook
       })
-      setGeneralResult({ ok: true, msg: 'Settings saved.' })
+      showToast('Settings saved')
     } catch (err: unknown) {
-      setGeneralResult({ ok: false, msg: err instanceof Error ? err.message : 'Save failed' })
+      showToast(err instanceof Error ? err.message : 'Save failed', { error: true })
     } finally {
       setSavingGeneral(false)
     }
@@ -61,25 +98,59 @@ export function SettingsPage() {
 
   const handleChangePassword = async () => {
     setPwdResult(null)
-    if (newPassword !== confirmPassword) {
-      setPwdResult({ ok: false, msg: 'New passwords do not match.' })
-      return
-    }
-    if (newPassword.length < 8) {
-      setPwdResult({ ok: false, msg: 'Password must be at least 8 characters.' })
-      return
-    }
+    if (newPassword !== confirmPassword) { setPwdResult({ ok: false, msg: 'New passwords do not match.' }); return }
+    if (newPassword.length < 8)          { setPwdResult({ ok: false, msg: 'Password must be at least 8 characters.' }); return }
     setSavingPwd(true)
     try {
       const res = await api.settings.changePassword(oldPassword, newPassword)
       setPwdResult({ ok: true, msg: res.message })
-      setOldPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
+      setOldPassword(''); setNewPassword(''); setConfirmPassword('')
     } catch (err: unknown) {
       setPwdResult({ ok: false, msg: err instanceof Error ? err.message : 'Failed' })
     } finally {
       setSavingPwd(false)
+    }
+  }
+
+  const handle2faSetup = async () => {
+    setTotpLoading(true); setTotpError(null)
+    try {
+      const res = await api.auth.setup2fa()
+      setQrDataUrl(res.qrDataUrl)
+      setTotpSecret(res.secret)
+      setSetupStep('scan')
+    } catch (err: unknown) {
+      setTotpError(err instanceof Error ? err.message : 'Failed')
+    } finally {
+      setTotpLoading(false)
+    }
+  }
+
+  const handle2faEnable = async () => {
+    setTotpLoading(true); setTotpError(null)
+    try {
+      await api.auth.enable2fa(totpCode)
+      setTotpEnabled(true)
+      setSetupStep('idle')
+      setTotpCode('')
+      showToast('Two-factor authentication enabled')
+    } catch (err: unknown) {
+      setTotpError(err instanceof Error ? err.message : 'Invalid code')
+    } finally {
+      setTotpLoading(false)
+    }
+  }
+
+  const handle2faDisable = async () => {
+    setTotpLoading(true); setTotpError(null)
+    try {
+      await api.auth.disable2fa()
+      setTotpEnabled(false)
+      showToast('Two-factor authentication disabled')
+    } catch (err: unknown) {
+      setTotpError(err instanceof Error ? err.message : 'Failed')
+    } finally {
+      setTotpLoading(false)
     }
   }
 
@@ -94,16 +165,6 @@ export function SettingsPage() {
           <Card>
             <BlockStack gap="400">
               <Text as="h2" variant="headingMd">General</Text>
-
-              {generalResult && (
-                <Banner
-                  tone={generalResult.ok ? 'success' : 'critical'}
-                  onDismiss={() => setGeneralResult(null)}
-                >
-                  {generalResult.msg}
-                </Banner>
-              )}
-
               <TextField
                 label="Panel title"
                 value={settings.panel_title}
@@ -119,9 +180,7 @@ export function SettingsPage() {
                 autoComplete="off"
                 placeholder="https://deploy.example.com"
               />
-
               <Divider />
-
               <Text as="h3" variant="headingSm">Notifications (optional)</Text>
               <TextField
                 label="Notify email"
@@ -140,7 +199,6 @@ export function SettingsPage() {
                 autoComplete="off"
                 placeholder="https://hooks.slack.com/services/…"
               />
-
               <InlineStack align="end">
                 <Button variant="primary" onClick={handleSaveGeneral} loading={savingGeneral}>
                   Save settings
@@ -150,7 +208,7 @@ export function SettingsPage() {
           </Card>
         </Layout.Section>
 
-        {/* ── Email notifications ───────────────────────────────────────── */}
+        {/* ── Email notifications info ───────────────────────────────────── */}
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
@@ -171,62 +229,32 @@ export function SettingsPage() {
                   <div key={line} style={{ color: '#333', lineHeight: 1.8 }}>{line}</div>
                 ))}
               </div>
-              <Text as="p" variant="bodySm" tone="subdued">
-                Leave <Badge>SMTP_HOST</Badge> unset to disable email. Slack webhook above works independently.
-              </Text>
             </BlockStack>
           </Card>
         </Layout.Section>
 
-        {/* ── Security ──────────────────────────────────────────────────── */}
+        {/* ── Password + 2FA ────────────────────────────────────────────── */}
         <Layout.Section variant="oneHalf">
           <Card>
             <BlockStack gap="400">
               <Text as="h2" variant="headingMd">Change password</Text>
-
               {pwdResult && (
-                <Banner
-                  tone={pwdResult.ok ? 'success' : 'critical'}
-                  onDismiss={() => setPwdResult(null)}
-                >
+                <Banner tone={pwdResult.ok ? 'success' : 'critical'} onDismiss={() => setPwdResult(null)}>
                   {pwdResult.msg}
                 </Banner>
               )}
-
-              <TextField
-                label="Current password"
-                type="password"
-                value={oldPassword}
-                onChange={setOldPassword}
-                autoComplete="current-password"
-              />
-              <TextField
-                label="New password"
-                type="password"
-                value={newPassword}
-                onChange={setNewPassword}
-                autoComplete="new-password"
-                helpText="Minimum 8 characters."
-              />
+              <TextField label="Current password" type="password" value={oldPassword} onChange={setOldPassword} autoComplete="current-password" />
+              <TextField label="New password" type="password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" helpText="Minimum 8 characters." />
               <TextField
                 label="Confirm new password"
                 type="password"
                 value={confirmPassword}
                 onChange={setConfirmPassword}
                 autoComplete="new-password"
-                error={
-                  confirmPassword && confirmPassword !== newPassword
-                    ? 'Passwords do not match'
-                    : undefined
-                }
+                error={confirmPassword && confirmPassword !== newPassword ? 'Passwords do not match' : undefined}
               />
               <InlineStack align="end">
-                <Button
-                  variant="primary"
-                  onClick={handleChangePassword}
-                  loading={savingPwd}
-                  disabled={!oldPassword || !newPassword || !confirmPassword}
-                >
+                <Button variant="primary" onClick={handleChangePassword} loading={savingPwd} disabled={!oldPassword || !newPassword || !confirmPassword}>
                   Change password
                 </Button>
               </InlineStack>
@@ -234,13 +262,96 @@ export function SettingsPage() {
           </Card>
         </Layout.Section>
 
-        {/* ── About ─────────────────────────────────────────────────────── */}
+        {/* ── 2FA ───────────────────────────────────────────────────────── */}
         <Layout.Section variant="oneHalf">
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack gap="300" blockAlign="center">
+                <Text as="h2" variant="headingMd">Two-Factor Authentication</Text>
+                <Badge tone={totpEnabled ? 'success' : 'enabled'}>{totpEnabled ? 'Enabled' : 'Disabled'}</Badge>
+              </InlineStack>
+
+              {totpError && <Banner tone="critical" onDismiss={() => setTotpError(null)}>{totpError}</Banner>}
+
+              {!totpEnabled && setupStep === 'idle' && (
+                <>
+                  <Text as="p" tone="subdued" variant="bodySm">
+                    Add an extra layer of security using Google Authenticator or any TOTP app.
+                  </Text>
+                  <Button variant="primary" onClick={handle2faSetup} loading={totpLoading}>Set up 2FA</Button>
+                </>
+              )}
+
+              {setupStep === 'scan' && qrDataUrl && (
+                <BlockStack gap="300">
+                  <Text as="p" variant="bodySm">
+                    Scan the QR code with your authenticator app, then enter the 6-digit code to confirm.
+                  </Text>
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <img src={qrDataUrl} alt="2FA QR code" style={{ width: 180, height: 180 }} />
+                  </div>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Or enter manually: <code style={{ userSelect: 'all' }}>{totpSecret}</code>
+                  </Text>
+                  <Button onClick={() => setSetupStep('verify')}>I've scanned it →</Button>
+                </BlockStack>
+              )}
+
+              {setupStep === 'verify' && (
+                <BlockStack gap="300">
+                  <TextField
+                    label="Authenticator code"
+                    value={totpCode}
+                    onChange={setTotpCode}
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    placeholder="000000"
+                  />
+                  <InlineStack gap="300">
+                    <Button variant="primary" onClick={handle2faEnable} loading={totpLoading} disabled={totpCode.length < 6}>
+                      Enable 2FA
+                    </Button>
+                    <Button onClick={() => { setSetupStep('idle'); setTotpCode('') }}>Cancel</Button>
+                  </InlineStack>
+                </BlockStack>
+              )}
+
+              {totpEnabled && setupStep === 'idle' && (
+                <Button tone="critical" onClick={handle2faDisable} loading={totpLoading}>
+                  Disable 2FA
+                </Button>
+              )}
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* ── S3/R2 Backup ──────────────────────────────────────────────── */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">S3 / R2 Backup Storage</Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Configure credentials to upload database backups to S3-compatible storage (AWS S3, Cloudflare R2, MinIO, etc.). Set endpoint URL for non-AWS providers.
+              </Text>
+              <TextField label="Access Key ID" value={s3AccessKey} onChange={setS3AccessKey} autoComplete="off" />
+              <TextField label="Secret Access Key" value={s3SecretKey} onChange={setS3SecretKey} type="password" autoComplete="off" placeholder="Leave blank to keep existing secret" />
+              <TextField label="Region" value={s3Region} onChange={setS3Region} autoComplete="off" placeholder="auto (for R2) or us-east-1" />
+              <TextField label="Bucket" value={s3Bucket} onChange={setS3Bucket} autoComplete="off" />
+              <TextField label="Custom Endpoint URL (optional)" value={s3Endpoint} onChange={setS3Endpoint} autoComplete="off" placeholder="https://accountid.r2.cloudflarestorage.com (for R2)" />
+              <InlineStack align="end">
+                <Button variant="primary" onClick={saveS3} loading={savingS3}>Save S3 settings</Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* ── About ─────────────────────────────────────────────────────── */}
+        <Layout.Section>
           <Card>
             <BlockStack gap="400">
               <Text as="h2" variant="headingMd">About</Text>
               {[
-                { label: 'Version',  value: 'v1.0.0' },
+                { label: 'Version',  value: 'v2.0.0' },
                 { label: 'Stack',    value: 'Fastify · Prisma · SQLite · React · Polaris' },
                 { label: 'Database', value: 'SQLite (dev.db)' },
                 { label: 'API port', value: '3001 (bound to 127.0.0.1)' }
