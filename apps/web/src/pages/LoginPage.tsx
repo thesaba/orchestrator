@@ -8,7 +8,7 @@ import {
   BlockStack,
   Text
 } from '@shopify/polaris'
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
@@ -54,6 +54,7 @@ export function LoginPage() {
           <Card>
             <BlockStack gap="400">
               {error && <Banner tone="critical">{error}</Banner>}
+              <div onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => e.key === 'Enter' && handleSubmit()}>
               <FormLayout>
                 <TextField
                   label="Email"
@@ -68,7 +69,6 @@ export function LoginPage() {
                   value={password}
                   onChange={setPassword}
                   autoComplete="current-password"
-                  onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
                 />
                 <Button
                   variant="primary"
@@ -80,6 +80,7 @@ export function LoginPage() {
                   Sign in
                 </Button>
               </FormLayout>
+              </div>
             </BlockStack>
           </Card>
         </BlockStack>

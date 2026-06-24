@@ -1015,7 +1015,7 @@ export function SiteDetailPage() {
         open={!!logModal}
         onClose={() => setLogModal(null)}
         title={logModal ? `Deploy log — ${logModal.branch}@${logModal.commit ?? '?'}` : ''}
-        large
+        size="large"
       >
         <Modal.Section>
           {logModal?.log ? (
