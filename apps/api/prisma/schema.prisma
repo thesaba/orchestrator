@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+}
+
+model Site {
+  id          Int          @id @default(autoincrement())
+  name        String
+  domain      String       @unique
+  phpVersion  String       @default("8.2")
+  dbName      String?
+  dbUser      String?
+  sslEnabled    Boolean      @default(false)
+  rootPath      String
+  status        String       @default("pending")
+  repoUrl       String?
+  branch        String       @default("main")
+  webhookToken  String?      @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deployments Deployment[]
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  action    String   // "deploy.success", "site.created", "rollback.failed", …
+  siteId    Int?
+  userId    Int?
+  meta      String?  // JSON blob
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Deployment {
+  id        Int      @id @default(autoincrement())
+  siteId    Int
+  site      Site     @relation(fields: [siteId], references: [id])
+  commit    String?
+  branch    String   @default("main")
+  status    String   @default("pending")
+  log       String?
+  createdAt DateTime @default(now())
+}

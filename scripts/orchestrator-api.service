@@ -1,0 +1,46 @@
+# systemd service for the Orchestrator API (Node.js / Fastify).
+#
+# Install:
+#   sudo cp orchestrator-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable orchestrator-api
+#   sudo systemctl start orchestrator-api
+#
+# Logs:
+#   journalctl -u orchestrator-api -f
+
+[Unit]
+Description=Orchestrator API
+Documentation=https://github.com/your-org/orchestrator
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=deployer
+Group=deployer
+WorkingDirectory=/opt/orchestrator/apps/api
+
+# Built JS entry point — run `pnpm build` first
+ExecStart=/usr/bin/node dist/index.js
+
+# Load env vars from the production .env file
+EnvironmentFile=/opt/orchestrator/apps/api/.env
+
+# Restart automatically on crash; don't restart on clean exit (code 0)
+Restart=on-failure
+RestartSec=5s
+
+# Prevent runaway restart loops
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+# Graceful shutdown — wait up to 30 s for in-flight deploys to emit their done event
+TimeoutStopSec=30s
+KillMode=mixed
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orchestrator-api
+
+[Install]
+WantedBy=multi-user.target
