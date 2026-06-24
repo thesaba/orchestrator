@@ -14,8 +14,6 @@ function scriptsDir(): string {
 export const sitesRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
 
-  // Strip the encrypted gitToken column before sending a site to the client —
-  // it's write-only; the UI only needs to know whether one is set.
   function redactGitToken<T extends { gitToken?: string | null }>(site: T) {
     const { gitToken, ...rest } = site
     return { ...rest, hasGitToken: !!gitToken }
@@ -23,10 +21,8 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/', async () => {
     const sites = await app.prisma.site.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        deployments: { take: 1, orderBy: { createdAt: 'desc' } }
-      }
+      orderBy: [{ pinned: 'desc' }, { createdAt: 'desc' }],
+      include: { deployments: { take: 1, orderBy: { createdAt: 'desc' } } }
     })
     return sites.map(redactGitToken)
   })
@@ -39,6 +35,16 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
     return redactGitToken(site)
+  })
+
+  // GET /tags — all distinct tags across all sites
+  app.get('/tags', async () => {
+    const sites = await app.prisma.site.findMany({ select: { tags: true } })
+    const allTags = new Set<string>()
+    sites.forEach((s) => {
+      try { JSON.parse(s.tags).forEach((t: string) => allTags.add(t)) } catch { /* ignore */ }
+    })
+    return { tags: [...allTags].sort() }
   })
 
   app.post('/', {
@@ -57,20 +63,87 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     }
   }, async (request, reply) => {
     const { name, domain, phpVersion } = request.body as {
-      name: string
-      domain: string
-      phpVersion?: string
+      name: string; domain: string; phpVersion?: string
     }
     const site = await app.prisma.site.create({
-      data: {
-        name,
-        domain,
-        phpVersion: phpVersion ?? '8.2',
-        rootPath: `/var/www/sites/${domain}`
-      }
+      data: { name, domain, phpVersion: phpVersion ?? '8.2', rootPath: `/var/www/sites/${domain}` }
     })
     app.audit('site.created', { siteId: site.id, meta: { domain, phpVersion: site.phpVersion } })
     reply.code(201)
+    return redactGitToken(site)
+  })
+
+  // POST /:id/clone — duplicate a site's config to a new site
+  app.post('/:id/clone', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name', 'domain'],
+        properties: {
+          name:   { type: 'string', minLength: 1, maxLength: 100 },
+          domain: { type: 'string', minLength: 3, maxLength: 253 }
+        },
+        additionalProperties: false
+      }
+    }
+  }, async (request, reply) => {
+    const sourceId = Number((request.params as { id: string }).id)
+    const { name, domain } = request.body as { name: string; domain: string }
+
+    const source = await app.prisma.site.findUnique({ where: { id: sourceId } })
+    if (!source) return reply.code(404).send({ error: 'Source site not found' })
+
+    const clone = await app.prisma.site.create({
+      data: {
+        name,
+        domain,
+        phpVersion: source.phpVersion,
+        rootPath: `/var/www/sites/${domain}`,
+        repoUrl: source.repoUrl,
+        branch: source.branch,
+        preDeploy: source.preDeploy,
+        postDeploy: source.postDeploy,
+        healthCheck: source.healthCheck,
+        healthCheckUrl: source.healthCheckUrl,
+        tags: source.tags,
+        // don't copy: gitToken, webhookToken, deployments, dbName/dbUser
+      }
+    })
+
+    app.audit('site.cloned', { siteId: clone.id, meta: { from: source.domain, to: domain } })
+    reply.code(201)
+    return redactGitToken(clone)
+  })
+
+  // PATCH /:id — update tags, pinned, notes, etc.
+  app.patch('/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          name:    { type: 'string', minLength: 1, maxLength: 100 },
+          tags:    { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
+          pinned:  { type: 'boolean' },
+          notes:   { type: 'string', maxLength: 2000 }
+        },
+        additionalProperties: false
+      }
+    }
+  }, async (request, reply) => {
+    const siteId = Number((request.params as { id: string }).id)
+    const { name, tags, pinned, notes } = request.body as {
+      name?: string; tags?: string[]; pinned?: boolean; notes?: string
+    }
+
+    const site = await app.prisma.site.update({
+      where: { id: siteId },
+      data: {
+        ...(name    !== undefined && { name }),
+        ...(tags    !== undefined && { tags: JSON.stringify(tags) }),
+        ...(pinned  !== undefined && { pinned }),
+        ...(notes   !== undefined && { notes })
+      }
+    })
     return redactGitToken(site)
   })
 
@@ -81,7 +154,6 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     const site = await app.prisma.site.findUnique({ where: { id: Number(id) } })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
-    // Run server cleanup before removing DB record so we still have the metadata
     let cleanupLog = ''
     let cleanupOk: boolean | null = null
     if (cleanup === 'true') {
@@ -105,9 +177,31 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     await app.prisma.site.delete({ where: { id: Number(id) } })
     app.audit('site.deleted', { meta: { domain: site.domain } })
 
-    if (cleanup === 'true') {
-      return { ok: true, cleanupOk, cleanupLog }
-    }
+    if (cleanup === 'true') return { ok: true, cleanupOk, cleanupLog }
     reply.code(204).send()
+  })
+
+  // GET /branches — list remote branches for a site's repo
+  app.get('/:id/branches', async (request, reply) => {
+    const site = await app.prisma.site.findUnique({
+      where: { id: Number((request.params as { id: string }).id) }
+    })
+    if (!site || !site.repoUrl) return reply.code(400).send({ error: 'No repository configured' })
+
+    try {
+      const { stdout } = await exec(
+        `git ls-remote --heads "${site.repoUrl}" 2>&1`,
+        { timeout: 15_000 }
+      )
+      const branches = stdout
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('\t')[1]?.replace('refs/heads/', '').trim())
+        .filter(Boolean)
+      return { branches }
+    } catch {
+      // If auth fails (private repo without token), return empty
+      return { branches: [] }
+    }
   })
 }
