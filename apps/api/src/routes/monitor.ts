@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import { spawn, exec as execCb } from 'child_process'
 import { promisify } from 'util'
+import tls from 'tls'
 import os from 'os'
 
 const exec = promisify(execCb)
@@ -190,6 +191,74 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
         resolve()
       })
     })
+  })
+
+  // ── GET /stats/history — last 7 days deploy counts for charts ───────────
+  app.get('/stats/history', async () => {
+    const days: { date: string; success: number; failed: number }[] = []
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(d.getDate() - i)
+      d.setHours(0, 0, 0, 0)
+      const nextD = new Date(d)
+      nextD.setDate(nextD.getDate() + 1)
+
+      const [success, failed] = await Promise.all([
+        app.prisma.deployment.count({ where: { status: 'success', createdAt: { gte: d, lt: nextD } } }),
+        app.prisma.deployment.count({ where: { status: 'failed', createdAt: { gte: d, lt: nextD } } })
+      ])
+      days.push({ date: d.toISOString().slice(0, 10), success, failed })
+    }
+    return { days }
+  })
+
+  // ── GET /ssl — SSL expiry for all active sites ───────────────────────────
+  app.get('/ssl', async () => {
+    const sites = await app.prisma.site.findMany({
+      where: { status: 'active', sslEnabled: true },
+      select: { id: true, domain: true }
+    })
+
+    const results = await Promise.all(
+      sites.map(async (site) => {
+        return new Promise<{ siteId: number; domain: string; daysLeft: number | null; expiresAt: string | null; error: string | null }>(
+          (resolve) => {
+            const timeout = setTimeout(() => {
+              resolve({ siteId: site.id, domain: site.domain, daysLeft: null, expiresAt: null, error: 'Timeout' })
+            }, 10_000)
+
+            try {
+              const socket = tls.connect(
+                { host: site.domain, port: 443, servername: site.domain, rejectUnauthorized: false },
+                () => {
+                  clearTimeout(timeout)
+                  const cert = socket.getPeerCertificate()
+                  socket.destroy()
+
+                  if (!cert?.valid_to) {
+                    resolve({ siteId: site.id, domain: site.domain, daysLeft: null, expiresAt: null, error: 'No certificate' })
+                    return
+                  }
+
+                  const expiresAt = new Date(cert.valid_to)
+                  const daysLeft = Math.floor((expiresAt.getTime() - Date.now()) / 86_400_000)
+                  resolve({ siteId: site.id, domain: site.domain, daysLeft, expiresAt: expiresAt.toISOString(), error: null })
+                }
+              )
+              socket.on('error', (err) => {
+                clearTimeout(timeout)
+                resolve({ siteId: site.id, domain: site.domain, daysLeft: null, expiresAt: null, error: err.message })
+              })
+            } catch (err: unknown) {
+              clearTimeout(timeout)
+              resolve({ siteId: site.id, domain: site.domain, daysLeft: null, expiresAt: null, error: (err as Error).message })
+            }
+          }
+        )
+      })
+    )
+
+    return { sites: results }
   })
 
   // ── GET /logs/:siteId/stream — SSE tail of Laravel log ──────────────────
