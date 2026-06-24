@@ -42,13 +42,16 @@ ln -sf "$SHARED_DIR/storage" storage
 ln -sf "$SHARED_DIR/.env" .env
 
 # ── 3. Composer ──────────────────────────────────────────────────────────────
+# Note: deliberately NOT --quiet — when composer's dependency solver fails
+# (e.g. lock file out of sync, missing PHP extension), --quiet hides the
+# detailed "Problem 1 - ..." reasoning and only the generic summary line
+# survives, which makes the deploy log useless for debugging.
 log "[3/7] Installing PHP dependencies..."
 composer install \
   --no-dev \
   --no-interaction \
   --prefer-dist \
-  --optimize-autoloader \
-  --quiet
+  --optimize-autoloader
 
 # ── 4. Artisan caches ────────────────────────────────────────────────────────
 log "[4/7] Caching Laravel config, routes, views..."
