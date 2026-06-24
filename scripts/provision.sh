@@ -24,6 +24,7 @@ mkdir -p "$SITE_DIR/releases"
 mkdir -p "$SITE_DIR/shared/storage/app/public"
 mkdir -p "$SITE_DIR/shared/storage/framework/"{sessions,views,cache}
 mkdir -p "$SITE_DIR/shared/storage/logs"
+mkdir -p "$SITE_DIR/shared/logs"
 touch "$SITE_DIR/shared/.env"
 chown -R www-data:www-data "$SITE_DIR"
 chmod 750 "$SITE_DIR/shared"
