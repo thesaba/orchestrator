@@ -91,18 +91,12 @@ export function ProvisionLog({ endpoint, onComplete }: Props) {
       )}
 
       <div
+        className="oc-terminal"
         style={{
-          background: '#0d1117',
-          color: '#e6edf3',
-          fontFamily: '"JetBrains Mono", "Fira Code", monospace',
           fontSize: '12.5px',
           lineHeight: '1.6',
-          padding: '16px',
-          borderRadius: '8px',
           minHeight: '200px',
           maxHeight: '440px',
-          overflowY: 'auto',
-          whiteSpace: 'pre-wrap',
           wordBreak: 'break-all'
         }}
       >

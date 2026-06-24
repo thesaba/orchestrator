@@ -86,17 +86,12 @@ export function ConfigEditor({
         onKeyDown={handleKeyDown}
         disabled={disabled}
         spellCheck={false}
+        className="oc-terminal"
         style={{
           width: '100%',
           minHeight,
-          fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace',
           fontSize: '13px',
           lineHeight: '1.6',
-          background: '#0d1117',
-          color: '#e6edf3',
-          border: '1px solid #30363d',
-          borderRadius: '6px',
-          padding: '14px 16px',
           resize: 'vertical',
           outline: 'none',
           boxSizing: 'border-box',

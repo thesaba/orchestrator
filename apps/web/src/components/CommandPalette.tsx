@@ -82,7 +82,9 @@ export function CommandPalette({ open, onClose }: Props) {
     <div
       style={{
         position: 'fixed', inset: 0, zIndex: 10000,
-        background: 'rgba(0,0,0,0.5)',
+        background: 'rgba(0,0,0,0.55)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
         paddingTop: '15vh'
       }}
@@ -91,15 +93,15 @@ export function CommandPalette({ open, onClose }: Props) {
       <div
         style={{
           width: '100%', maxWidth: 560,
-          background: 'var(--p-color-bg-surface, #fff)',
+          background: 'var(--p-color-bg-surface)',
           borderRadius: 12, overflow: 'hidden',
-          boxShadow: '0 25px 60px rgba(0,0,0,0.35)',
-          border: '1px solid var(--p-color-border, #e1e3e5)'
+          boxShadow: '0 25px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,0,0,0.08)',
+          border: '1px solid var(--oc-border)'
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: '1px solid var(--p-color-border, #e1e3e5)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: '1px solid var(--oc-border)' }}>
           <span style={{ fontSize: 18 }}>🔍</span>
           <input
             autoFocus
@@ -109,14 +111,14 @@ export function CommandPalette({ open, onClose }: Props) {
             style={{
               flex: 1, border: 'none', outline: 'none', fontSize: 16,
               background: 'transparent',
-              color: 'var(--p-color-text, #1a1a2e)'
+              color: 'var(--p-color-text)'
             }}
           />
           <kbd style={{
             fontSize: 11, padding: '2px 6px', borderRadius: 4,
-            background: 'var(--p-color-bg-surface-secondary, #f6f6f7)',
-            border: '1px solid var(--p-color-border, #e1e3e5)',
-            color: 'var(--p-color-text-subdued, #6d7175)'
+            background: 'var(--oc-bg-secondary)',
+            border: '1px solid var(--oc-border)',
+            color: 'var(--oc-text-subdued)'
           }}>ESC</kbd>
         </div>
 
@@ -133,15 +135,15 @@ export function CommandPalette({ open, onClose }: Props) {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '10px 16px', cursor: 'pointer',
-                  background: i === active ? 'var(--p-color-bg-surface-hover, #f1f2f3)' : 'transparent',
-                  borderLeft: i === active ? '3px solid var(--p-color-border-interactive, #458fff)' : '3px solid transparent'
+                  background: i === active ? 'var(--oc-bg-secondary)' : 'transparent',
+                  borderLeft: i === active ? '3px solid var(--oc-accent)' : '3px solid transparent'
                 }}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => { item.onSelect(); onClose() }}
               >
                 <span style={{ fontSize: 20, flexShrink: 0 }}>{item.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--p-color-text, #1a1a2e)' }}>
+                  <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--p-color-text)' }}>
                     {item.label}
                   </div>
                   {item.subtitle && (
@@ -157,8 +159,8 @@ export function CommandPalette({ open, onClose }: Props) {
 
         {/* Footer hint */}
         <div style={{
-          padding: '8px 16px', borderTop: '1px solid var(--p-color-border, #e1e3e5)',
-          display: 'flex', gap: 16, fontSize: 11, color: 'var(--p-color-text-subdued, #6d7175)'
+          padding: '8px 16px', borderTop: '1px solid var(--oc-border)',
+          display: 'flex', gap: 16, fontSize: 11, color: 'var(--oc-text-subdued)'
         }}>
           <span><kbd>↑↓</kbd> Navigate</span>
           <span><kbd>↵</kbd> Open</span>

@@ -186,19 +186,8 @@ export function SslTab({ siteId }: Props) {
       {/* ── Certbot output terminal ───────────────────────── */}
       {logs.length > 0 && (
         <div
-          style={{
-            background: '#1a1a1a',
-            color: '#d4d4d4',
-            fontFamily: 'monospace',
-            fontSize: 12,
-            lineHeight: 1.5,
-            padding: '12px 16px',
-            borderRadius: 6,
-            maxHeight: 360,
-            overflowY: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all'
-          }}
+          className="oc-terminal"
+          style={{ lineHeight: 1.5, maxHeight: 360, wordBreak: 'break-all' }}
         >
           {logs.map((line, i) => (
             <div key={i}>{line}</div>

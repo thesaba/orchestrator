@@ -88,7 +88,7 @@ export function DashboardPage() {
                 <div style={{ height: 220 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--p-color-border, #e1e3e5)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--oc-border)" />
                       <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                       <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                       <Tooltip />
@@ -118,7 +118,7 @@ export function DashboardPage() {
                   {recentDeploys.map((d) => (
                     <div key={d.id} style={{
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '8px 0', borderBottom: '1px solid #e1e3e5'
+                      padding: '8px 0', borderBottom: '1px solid var(--oc-border)'
                     }}>
                       <BlockStack gap="100">
                         <Text as="p" variant="bodyMd" fontWeight="semibold">{d.domain}</Text>
@@ -155,7 +155,7 @@ export function DashboardPage() {
                   {sites.map((s) => (
                     <div key={s.id} onClick={() => navigate(`/sites/${s.id}`)} style={{
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '8px 0', borderBottom: '1px solid #e1e3e5', cursor: 'pointer'
+                      padding: '8px 0', borderBottom: '1px solid var(--oc-border)', cursor: 'pointer'
                     }}>
                       <InlineStack gap="200" align="start">
                         {s.pinned && <Text as="span" variant="bodySm">📌</Text>}

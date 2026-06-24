@@ -85,19 +85,15 @@ export function SitesPage() {
       {allTags.length > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <button
+            className={`oc-tag-chip${filterTag === '' ? ' active' : ''}`}
             onClick={() => setFilterTag('')}
-            style={{
-              padding: '4px 12px', borderRadius: 20, border: '1px solid #c9cccf', cursor: 'pointer',
-              background: filterTag === '' ? '#1a1a2e' : 'transparent',
-              color: filterTag === '' ? '#fff' : '#1a1a2e', fontSize: 13
-            }}
           >All</button>
           {allTags.map((t) => (
-            <button key={t} onClick={() => setFilterTag(filterTag === t ? '' : t)} style={{
-              padding: '4px 12px', borderRadius: 20, border: '1px solid #c9cccf', cursor: 'pointer',
-              background: filterTag === t ? '#458fff' : 'transparent',
-              color: filterTag === t ? '#fff' : '#1a1a2e', fontSize: 13
-            }}>{t}</button>
+            <button
+              key={t}
+              className={`oc-tag-chip${filterTag === t ? ' selected' : ''}`}
+              onClick={() => setFilterTag(filterTag === t ? '' : t)}
+            >{t}</button>
           ))}
         </div>
       )}

@@ -1,0 +1,123 @@
+/* ─── Orchestrator global styles ────────────────────────────────────────────── */
+:root {
+  --oc-bg:               #ffffff;
+  --oc-bg-secondary:     #f6f6f7;
+  --oc-bg-tertiary:      #f1f2f3;
+  --oc-border:           #e1e3e5;
+  --oc-border-input:     #c9cccf;
+  --oc-text:             #1a1a2e;
+  --oc-text-subdued:     #6d7175;
+  --oc-accent:           #458fff;
+  --oc-remove-color:     #de3618;
+  --oc-code-bg:          #f6f6f7;
+  --oc-code-text:        #1a1a2e;
+  --oc-tag-active-bg:    #303030;
+  --oc-tag-active-text:  #ffffff;
+  --oc-tag-selected-bg:  #458fff;
+}
+
+/* ─── Terminal / log / code blocks ──────────────────────────────────────────── */
+.oc-terminal {
+  background: #0d1117 !important;
+  color: #e6edf3 !important;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  border-radius: 8px;
+  padding: 16px;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  line-height: 1.5;
+  border: 1px solid #21262d;
+}
+
+/* ─── Env editor input ───────────────────────────────────────────────────────── */
+.oc-env-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--oc-border-input);
+  border-radius: 6px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  background: var(--oc-bg);
+  color: var(--oc-text);
+  outline: none;
+}
+.oc-env-input:focus {
+  border-color: var(--oc-accent);
+  box-shadow: 0 0 0 2px rgba(69, 143, 255, 0.15);
+}
+
+/* ─── Tag filter chips ───────────────────────────────────────────────────────── */
+.oc-tag-chip {
+  padding: 4px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--oc-border-input);
+  cursor: pointer;
+  background: transparent;
+  color: var(--oc-text);
+  font-size: 13px;
+  font-family: inherit;
+}
+.oc-tag-chip:hover {
+  background: var(--oc-bg-secondary);
+}
+.oc-tag-chip.active {
+  background: var(--oc-tag-active-bg);
+  color: var(--oc-tag-active-text);
+  border-color: var(--oc-tag-active-bg);
+}
+.oc-tag-chip.selected {
+  background: var(--oc-tag-selected-bg);
+  color: #ffffff;
+  border-color: var(--oc-tag-selected-bg);
+}
+
+/* ─── Panel name in TopBar ───────────────────────────────────────────────────── */
+.oc-panel-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 4px;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 15px;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+  user-select: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.oc-panel-name .oc-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #458fff;
+  font-size: 16px;
+  font-weight: 900;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* ─── Settings code block ────────────────────────────────────────────────────── */
+.oc-settings-code {
+  background: var(--oc-code-bg);
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--oc-code-text);
+  line-height: 1.8;
+}
+
+/* ─── Login page background ──────────────────────────────────────────────────── */
+.oc-login-bg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--oc-bg-secondary);
+}

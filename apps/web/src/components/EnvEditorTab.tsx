@@ -155,12 +155,7 @@ export function EnvEditorTab({ siteId }: { siteId: number }) {
                       type={show ? 'text' : 'password'}
                       value={v.value}
                       onChange={(e) => updateVar(v.key, e.target.value)}
-                      style={{
-                        width: '100%', padding: '6px 10px', border: '1px solid #c9cccf',
-                        borderRadius: 6, fontFamily: 'monospace', fontSize: 13,
-                        background: 'var(--p-color-bg-surface, #fff)',
-                        color: 'var(--p-color-text, #1a1a2e)'
-                      }}
+                      className="oc-env-input"
                     />
                   </div>
                   {sensitive && (
@@ -175,7 +170,7 @@ export function EnvEditorTab({ siteId }: { siteId: number }) {
                   <button
                     onClick={() => removeVar(v.key)}
                     title="Remove"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px', fontSize: 16, color: '#de3618' }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px', fontSize: 16, color: 'var(--oc-remove-color)' }}
                   >
                     ✕
                   </button>

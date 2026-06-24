@@ -217,7 +217,7 @@ export function SettingsPage() {
                 Email alerts are sent on deploy success/failure to the address above.
                 SMTP is configured via environment variables in the API <Badge>apps/api/.env</Badge>
               </Text>
-              <div style={{ background: '#f6f6f7', borderRadius: 8, padding: '12px 16px', fontFamily: 'monospace', fontSize: 12 }}>
+              <div className="oc-settings-code">
                 {[
                   'SMTP_HOST=smtp.example.com',
                   'SMTP_PORT=587',
@@ -226,7 +226,7 @@ export function SettingsPage() {
                   'SMTP_PASS=yourpassword',
                   'SMTP_FROM="Orchestrator <noreply@example.com>"',
                 ].map((line) => (
-                  <div key={line} style={{ color: '#333', lineHeight: 1.8 }}>{line}</div>
+                  <div key={line} style={{ lineHeight: 1.8 }}>{line}</div>
                 ))}
               </div>
             </BlockStack>
@@ -268,7 +268,7 @@ export function SettingsPage() {
             <BlockStack gap="400">
               <InlineStack gap="300" blockAlign="center">
                 <Text as="h2" variant="headingMd">Two-Factor Authentication</Text>
-                <Badge tone={totpEnabled ? 'success' : 'enabled'}>{totpEnabled ? 'Enabled' : 'Disabled'}</Badge>
+                <Badge tone={totpEnabled ? 'success' : 'info'}>{totpEnabled ? 'Enabled' : 'Disabled'}</Badge>
               </InlineStack>
 
               {totpError && <Banner tone="critical" onDismiss={() => setTotpError(null)}>{totpError}</Banner>}

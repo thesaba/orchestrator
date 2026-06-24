@@ -3,7 +3,6 @@ import enTranslations from '@shopify/polaris/locales/en.json'
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom'
 import { ComponentProps } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
-import { ThemeProvider, useTheme } from './context/ThemeContext'
 import { AppLayout } from './components/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -32,13 +31,13 @@ function AppRoutes() {
           <ProtectedRoute>
             <AppLayout>
               <Routes>
-                <Route path="/"          element={<DashboardPage />} />
-                <Route path="/sites"     element={<SitesPage />} />
-                <Route path="/sites/new" element={<ProvisionPage />} />
-                <Route path="/sites/:id" element={<SiteDetailPage />} />
+                <Route path="/"           element={<DashboardPage />} />
+                <Route path="/sites"      element={<SitesPage />} />
+                <Route path="/sites/new"  element={<ProvisionPage />} />
+                <Route path="/sites/:id"  element={<SiteDetailPage />} />
                 <Route path="/monitoring" element={<MonitoringPage />} />
-                <Route path="/settings"  element={<SettingsPage />} />
-                <Route path="*"          element={<Navigate to="/" replace />} />
+                <Route path="/settings"   element={<SettingsPage />} />
+                <Route path="*"           element={<Navigate to="/" replace />} />
               </Routes>
             </AppLayout>
           </ProtectedRoute>
@@ -48,23 +47,14 @@ function AppRoutes() {
   )
 }
 
-function ThemedApp() {
-  const { colorScheme } = useTheme()
+export default function App() {
   return (
-    <AppProvider i18n={enTranslations} linkComponent={PolarisLink} theme={colorScheme === 'dark' ? 'dark-experimental' : 'light'}>
+    <AppProvider i18n={enTranslations} linkComponent={PolarisLink}>
       <AuthProvider>
         <BrowserRouter>
           <AppRoutes />
         </BrowserRouter>
       </AuthProvider>
     </AppProvider>
-  )
-}
-
-export default function App() {
-  return (
-    <ThemeProvider>
-      <ThemedApp />
-    </ThemeProvider>
   )
 }
