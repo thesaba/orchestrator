@@ -5,3 +5,4 @@ dist/
 *.db-journal
 prisma/migrations/
 DEPLOY_GUIDE.md
+.claude/settings.local.json
