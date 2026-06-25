@@ -7,6 +7,9 @@ import multipart from '@fastify/multipart'
 import { prismaPlugin } from './plugins/prisma'
 import { jwtPlugin } from './plugins/auth'
 import { auditPlugin } from './plugins/audit'
+import { rbacPlugin } from './plugins/rbac'
+import { usersRoutes } from './routes/users'
+import { dbManageRoutes } from './routes/db-manage'
 import { authRoutes } from './routes/auth'
 import { sitesRoutes } from './routes/sites'
 import { provisionRoutes } from './routes/provision'
@@ -49,6 +52,7 @@ async function start() {
   await app.register(prismaPlugin)
   await app.register(jwtPlugin)
   await app.register(auditPlugin)
+  await app.register(rbacPlugin)
 
   await app.register(authRoutes,        { prefix: '/api/auth' })
   await app.register(sitesRoutes,       { prefix: '/api/sites' })
@@ -79,6 +83,8 @@ async function start() {
   await app.register(s3BackupRoutes,    { prefix: '/api/sites' })
   await app.register(logsRoutes,        { prefix: '/api/sites' })
   await app.register(fileManagerRoutes, { prefix: '/api/sites' })
+  await app.register(dbManageRoutes,    { prefix: '/api/sites' })
+  await app.register(usersRoutes,       { prefix: '/api/users' })
 
   app.get('/api/health', async () => ({ status: 'ok', ts: new Date() }))
 

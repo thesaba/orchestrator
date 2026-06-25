@@ -5,7 +5,7 @@ import {
   DatabaseIcon, WandIcon, BugIcon, ShieldCheckMarkIcon,
   WrenchIcon, ListBulletedIcon, AutomationIcon, PackageIcon,
   CodeAddIcon, FolderIcon, ClipboardChecklistIcon, PinIcon,
-  RefreshIcon
+  RefreshIcon, TeamIcon
 } from '@shopify/polaris-icons'
 import { ReactNode, useState, useCallback, useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useMatch, useSearchParams } from 'react-router-dom'
@@ -44,6 +44,7 @@ function RecentActivityPanel({ onClose }: { onClose: () => void }) {
               )}
               <div style={{ fontSize: 11, color: 'var(--oc-text-subdued)', marginTop: 2 }}>
                 {new Date(log.createdAt).toLocaleString()}
+                {log.userEmail && <span style={{ marginLeft: 4 }}>· {log.userEmail}</span>}
               </div>
             </div>
           ))}
@@ -231,7 +232,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [deployInProgress, setDeployInProgress]  = useState(false)
   const [activityOpen,     setActivityOpen]      = useState(false)
 
-  const { logout } = useAuth()
+  const { logout, user: authUser, isAdmin } = useAuth()
   const navigate   = useNavigate()
   const { pathname } = useLocation()
   const [searchParams] = useSearchParams()
@@ -311,6 +312,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             { label: 'Sites',      icon: GlobeIcon,         url: '/sites' },
             { label: 'Monitoring', icon: ChartVerticalIcon, url: '/monitoring' },
             { label: 'Settings',   icon: SettingsIcon,      url: '/settings' },
+            ...(isAdmin ? [{ label: 'Team', icon: TeamIcon, url: '/team' }] : []),
           ]}
         />
 
@@ -399,8 +401,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
               { content: 'Logout',               onAction: handleLogout }
             ]
           }]}
-          name="Admin"
-          initials="A"
+          name={authUser?.email ?? 'Admin'}
+          detail={authUser?.role ?? ''}
+          initials={(authUser?.email?.[0] ?? 'A').toUpperCase()}
           open={userMenuOpen}
           onToggle={() => setUserMenuOpen((p) => !p)}
         />

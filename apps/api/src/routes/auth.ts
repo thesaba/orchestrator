@@ -47,7 +47,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const token = app.jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: user.email, role: user.role },
       { expiresIn: '7d' }
     )
     return { token }
@@ -57,7 +57,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const payload = request.user as { userId: number; email: string }
     const user = await app.prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true, totpEnabled: true }
+      select: { id: true, email: true, totpEnabled: true, role: true }
     })
     return user
   })

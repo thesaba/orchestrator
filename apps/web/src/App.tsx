@@ -11,6 +11,7 @@ import { ProvisionPage } from './pages/ProvisionPage'
 import { SiteDetailPage } from './pages/SiteDetailPage'
 import { MonitoringPage } from './pages/MonitoringPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { TeamPage } from './pages/TeamPage'
 
 function PolarisLink({ children, url, ...rest }: ComponentProps<'a'> & { url: string }) {
   return <Link to={url} {...(rest as any)}>{children}</Link>
@@ -19,6 +20,13 @@ function PolarisLink({ children, url, ...rest }: ComponentProps<'a'> & { url: st
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
   return token ? <>{children}</> : <Navigate to="/login" replace />
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { token, isAdmin } = useAuth()
+  if (!token) return <Navigate to="/login" replace />
+  if (!isAdmin) return <Navigate to="/" replace />
+  return <>{children}</>
 }
 
 function AppRoutes() {
@@ -37,6 +45,7 @@ function AppRoutes() {
                 <Route path="/sites/:id"  element={<SiteDetailPage />} />
                 <Route path="/monitoring" element={<MonitoringPage />} />
                 <Route path="/settings"   element={<SettingsPage />} />
+                <Route path="/team"       element={<AdminRoute><TeamPage /></AdminRoute>} />
                 <Route path="*"           element={<Navigate to="/" replace />} />
               </Routes>
             </AppLayout>
