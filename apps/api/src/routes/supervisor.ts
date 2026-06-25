@@ -7,18 +7,26 @@ const exec = promisify(execCb)
 
 const VALID_WORKER_ACTIONS = new Set(['start', 'stop', 'restart'])
 
-// shared/logs is created by provision.sh as www-data:www-data, mode 750 — the
-// orchestrator-api process runs as the unprivileged 'deployer' user, so a plain
-// fs.mkdir() here fails with EACCES (silently, if swallowed by .catch(() => {})).
-// Try the unprivileged path first (works if the API ever does run as root),
-// then fall back to a narrowly-scoped sudoers rule — see DEPLOY_GUIDE.md
-// §5.3 (/etc/sudoers.d/deployer-fpm) for the line this requires.
+// shared/logs is created by provision.sh as www-data:www-data, mode 750.
+// In some deployments orchestrator-api runs as an unprivileged 'deployer'
+// user, in which case plain fs.mkdir() fails with EACCES and we fall back to
+// a narrowly-scoped sudoers rule — see DEPLOY_GUIDE.md §5.3
+// (/etc/sudoers.d/deployer-fpm). Errors from BOTH attempts are logged (not
+// swallowed) since a silent failure here is what caused the CANT_REREAD bug
+// to go unexplained for so long.
 async function ensureSharedLogsDir(rootPath: string): Promise<void> {
   const dir = `${rootPath}/shared/logs`
   try {
     await fs.mkdir(dir, { recursive: true })
-  } catch {
-    await exec(`sudo /usr/bin/install -d -o www-data -g www-data -m 0750 "${dir}"`).catch(() => {})
+    return
+  } catch (err) {
+    console.error(`[supervisor] direct mkdir failed for ${dir}:`, err)
+  }
+  try {
+    const { stdout, stderr } = await exec(`sudo /usr/bin/install -d -o www-data -g www-data -m 0750 "${dir}"`)
+    console.error(`[supervisor] sudo install -d fallback for ${dir} succeeded. stdout=${stdout} stderr=${stderr}`)
+  } catch (err) {
+    console.error(`[supervisor] sudo install -d fallback ALSO failed for ${dir}:`, err)
   }
 }
 
