@@ -547,3 +547,129 @@ export const redeployApi = {
     )
 }
 
+// ── File Manager API ──────────────────────────────────────────────────────────
+export interface FMEntry {
+  name: string
+  type: 'file' | 'dir' | 'symlink'
+  size: number
+  modified: string
+  permissions: string    // e.g. "755"
+  permsDisplay: string   // e.g. "rwxr-xr-x"
+  owner: string
+  group: string
+  ext: string
+  mime: string
+}
+
+export interface FMListResult {
+  entries: FMEntry[]
+  path: string
+  rootPath: string
+}
+
+export const fmApi = {
+  list: (siteId: number, p: string, opts?: { hidden?: boolean; sort?: string; order?: string }) => {
+    const q = new URLSearchParams({ path: p })
+    if (opts?.hidden) q.set('hidden', '1')
+    if (opts?.sort)   q.set('sort', opts.sort)
+    if (opts?.order)  q.set('order', opts.order)
+    return request<FMListResult>(`/sites/${siteId}/files?${q}`)
+  },
+  read: (siteId: number, p: string) =>
+    request<{ content: string; ext: string; mime: string; size: number; binary: boolean; path: string }>(
+      `/sites/${siteId}/files/read?path=${encodeURIComponent(p)}`
+    ),
+  write: (siteId: number, p: string, content: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/write`, {
+      method: 'PUT', body: JSON.stringify({ path: p, content })
+    }),
+  mkdir: (siteId: number, p: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/mkdir`, {
+      method: 'POST', body: JSON.stringify({ path: p })
+    }),
+  touch: (siteId: number, p: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/touch`, {
+      method: 'POST', body: JSON.stringify({ path: p })
+    }),
+  delete: (siteId: number, paths: string[]) =>
+    request<{ results: { path: string; ok: boolean; error?: string }[] }>(`/sites/${siteId}/files/delete`, {
+      method: 'DELETE', body: JSON.stringify({ paths })
+    }),
+  rename: (siteId: number, from: string, to: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/rename`, {
+      method: 'POST', body: JSON.stringify({ from, to })
+    }),
+  copy: (siteId: number, paths: string[], dest: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/copy`, {
+      method: 'POST', body: JSON.stringify({ paths, dest })
+    }),
+  move: (siteId: number, paths: string[], dest: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/move`, {
+      method: 'POST', body: JSON.stringify({ paths, dest })
+    }),
+  zip: (siteId: number, paths: string[], dest: string) =>
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/files/zip`, {
+      method: 'POST', body: JSON.stringify({ paths, dest })
+    }),
+  unzip: (siteId: number, p: string, dest: string) =>
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/files/unzip`, {
+      method: 'POST', body: JSON.stringify({ path: p, dest })
+    }),
+  tar: (siteId: number, paths: string[], dest: string) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/tar`, {
+      method: 'POST', body: JSON.stringify({ paths, dest })
+    }),
+  untar: (siteId: number, p: string, dest: string) =>
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/files/untar`, {
+      method: 'POST', body: JSON.stringify({ path: p, dest })
+    }),
+  chmod: (siteId: number, paths: string[], mode: string, recursive?: boolean) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/chmod`, {
+      method: 'POST', body: JSON.stringify({ paths, mode, recursive })
+    }),
+  chown: (siteId: number, paths: string[], owner: string, group?: string, recursive?: boolean) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/files/chown`, {
+      method: 'POST', body: JSON.stringify({ paths, owner, group, recursive })
+    }),
+  search: (siteId: number, p: string, q: string, type?: 'name' | 'content') => {
+    const qs = new URLSearchParams({ path: p, q, ...(type ? { type } : {}) })
+    return request<{ results: { path: string; name: string }[] }>(`/sites/${siteId}/files/search?${qs}`)
+  },
+  diff: (siteId: number, a: string, b: string) => {
+    const q = new URLSearchParams({ a, b })
+    return request<{ diff: string }>(`/sites/${siteId}/files/diff?${q}`)
+  },
+  properties: (siteId: number, p: string) =>
+    request<FMEntry & { totalSize: number }>(`/sites/${siteId}/files/properties?path=${encodeURIComponent(p)}`),
+  downloadUrl: (siteId: number, p: string) =>
+    `/api/sites/${siteId}/files/download?path=${encodeURIComponent(p)}`,
+  downloadZip: async (siteId: number, paths: string[], name: string) => {
+    const token = localStorage.getItem('orchestrator_token')
+    const res = await fetch(`/api/sites/${siteId}/files/download-zip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ paths, name })
+    })
+    if (!res.ok) throw new Error('Download failed')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `${name}.zip`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  },
+  upload: async (siteId: number, dest: string, files: File[], onProgress?: (pct: number) => void) => {
+    const token = localStorage.getItem('orchestrator_token')
+    const formData = new FormData()
+    files.forEach(f => formData.append('files', f))
+    return new Promise<{ results: { filename: string; ok: boolean; size?: number; error?: string }[] }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `/api/sites/${siteId}/files/upload?dest=${encodeURIComponent(dest)}`)
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(Math.round(e.loaded / e.total * 100)) }
+      xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)) } catch { reject(new Error('Upload failed')) } }
+      xhr.onerror = () => reject(new Error('Network error'))
+      xhr.send(formData)
+    })
+  }
+}
+
