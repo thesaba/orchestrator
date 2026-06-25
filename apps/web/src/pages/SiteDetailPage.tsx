@@ -1,7 +1,6 @@
 import {
   Page,
   Card,
-  Tabs,
   BlockStack,
   InlineStack,
   Text,
@@ -20,7 +19,7 @@ import {
   Checkbox
 } from '@shopify/polaris'
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ArtisanCommand, BackupFile, Deployment, Release, Site, maintenanceApi, logsApi, redeployApi } from '../api/client'
 import { ProvisionLog }      from '../components/ProvisionLog'
 import { ConfigEditor }      from '../components/ConfigEditor'
@@ -34,6 +33,7 @@ import { PhpFpmTab }         from '../components/PhpFpmTab'
 import { EnvEditorTab }      from '../components/EnvEditorTab'
 import { DeployTimeline }    from '../components/DeployTimeline'
 import { LaravelLogsTab }    from '../components/LaravelLogsTab'
+import { FileManagerTab }    from '../components/FileManagerTab'
 import { DeployHeatmap }     from '../components/DeployHeatmap'
 import { HealthScoreBadge }  from '../components/HealthScoreBadge'
 import { Breadcrumb }        from '../components/Breadcrumb'
@@ -64,7 +64,9 @@ export function SiteDetailPage() {
 
   const [site, setSite]       = useState<Site | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab]         = useState(0)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab    = searchParams.get('tab') ?? 'deploys'
+  const setTab = (slug: string) => setSearchParams({ tab: slug }, { replace: true })
 
   // Deploy state
   const [deploying, setDeploying]       = useState(false)
@@ -180,7 +182,7 @@ export function SiteDetailPage() {
   }, [siteId])
 
   // Tab index constants (easier to maintain)
-  const TAB = { DEPLOYS: 0, SETTINGS: 1, CONFIG: 2, ENV: 3, DATABASE: 4, ARTISAN: 5, WORKERS: 6, SSL: 7, MAINTENANCE: 8, COMPOSER: 9, FAILED_JOBS: 10, PHPFPM: 11, TERMINAL: 12, PROVISION: 13, LOGS: 14 }
+  const TAB = { DEPLOYS: 'deploys', SETTINGS: 'settings', CONFIG: 'config', ENV: 'env', DATABASE: 'database', ARTISAN: 'artisan', WORKERS: 'workers', SSL: 'ssl', MAINTENANCE: 'maintenance', COMPOSER: 'composer', FAILED_JOBS: 'failed-jobs', PHPFPM: 'phpfpm', TERMINAL: 'terminal', PROVISION: 'provision', LOGS: 'logs', FILES: 'files' }
 
   // Load Deploy Settings tab data
   useEffect(() => {
@@ -541,31 +543,11 @@ export function SiteDetailPage() {
           </Banner>
         )}
 
-        {/* ── Tabs ──────────────────────────────────────────────────────── */}
-        <Tabs
-          tabs={[
-            { id: 'deployments',  content: `Deployments (${site.deployments.length})` },
-            { id: 'settings',     content: 'Deploy Settings' },
-            { id: 'config',       content: 'Config' },
-            { id: 'env-editor',   content: '.env Editor' },
-            { id: 'database',     content: 'Database' },
-            { id: 'artisan',      content: 'Artisan' },
-            { id: 'workers',      content: 'Workers' },
-            { id: 'ssl',          content: site.sslEnabled ? '🔒 SSL' : 'SSL' },
-            { id: 'maintenance',  content: maintenanceMode ? '🔧 Maintenance' : 'Maintenance' },
-            { id: 'composer',     content: 'Composer' },
-            { id: 'failed-jobs',  content: 'Failed Jobs' },
-            { id: 'phpfpm',       content: 'PHP-FPM' },
-            { id: 'terminal',     content: 'Terminal' },
-            { id: 'provision',    content: 'Provision Log' },
-            { id: 'logs',         content: 'Laravel Logs' }
-          ]}
-          selected={tab}
-          onSelect={setTab}
-        >
+        {/* ── Tab content ───────────────────────────────────────────────── */}
+        <div>
 
           {/* Tab 0 — Deployments + Timeline */}
-          {tab === 0 && (
+          {tab === TAB.DEPLOYS && (
             <BlockStack gap="400">
               {site.deployments.length > 0 && (
                 <Card>
@@ -1072,7 +1054,14 @@ export function SiteDetailPage() {
             </Card>
           )}
 
-        </Tabs>
+          {/* Tab 15 — File Manager */}
+          {tab === TAB.FILES && (
+            <Card padding="0">
+              <FileManagerTab siteId={siteId} rootPath={site.rootPath} />
+            </Card>
+          )}
+
+        </div>
       </BlockStack>
 
       {/* ── Deployment log modal ──────────────────────────────────────────── */}
