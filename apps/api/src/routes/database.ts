@@ -17,11 +17,11 @@ function backupCronPath(domain: string): string {
   return `/etc/cron.d/${domain.replace(/\./g, '-')}-backup`
 }
 
-function backupCronContent(domain: string, rootPath: string, hour: number): string {
+function backupCronContent(domain: string, rootPath: string, hour: number, minute = 0, days = '*'): string {
   const script = path.join(scriptsDir(), 'backup.sh')
   return `# Orchestrator automated backup — ${domain}
 # Managed by Orchestrator — do not edit manually
-0 ${hour} * * * www-data bash "${script}" "${rootPath}" >> /var/log/orchestrator/backup.log 2>&1\n`
+${minute} ${hour} * * ${days} www-data bash "${script}" "${rootPath}" >> /var/log/orchestrator/backup.log 2>&1\n`
 }
 
 // Allow only safe filenames for download/delete
@@ -151,11 +151,14 @@ export const databaseRoutes: FastifyPluginAsync = async (app) => {
     const cronPath = backupCronPath(site.domain)
     try {
       const content = await fs.readFile(cronPath, 'utf-8')
-      const hourMatch = content.match(/^0 (\d+) \* \* \*/m)
-      const hour = hourMatch ? Number(hourMatch[1]) : 2
-      return { active: true, hour, cronPath }
+      // Match: minute hour * * days
+      const match = content.match(/^(\d+) (\d+) \* \* ([^\s]+)/m)
+      const minute = match ? Number(match[1]) : 0
+      const hour   = match ? Number(match[2]) : 2
+      const days   = match ? match[3] : '*'
+      return { active: true, hour, minute, days, cronPath }
     } catch {
-      return { active: false, hour: 2, cronPath }
+      return { active: false, hour: 2, minute: 0, days: '*', cronPath }
     }
   })
 
@@ -164,7 +167,11 @@ export const databaseRoutes: FastifyPluginAsync = async (app) => {
       body: {
         type: 'object',
         required: ['hour'],
-        properties: { hour: { type: 'integer', minimum: 0, maximum: 23 } },
+        properties: {
+          hour:   { type: 'integer', minimum: 0, maximum: 23 },
+          minute: { type: 'integer', minimum: 0, maximum: 59 },
+          days:   { type: 'string', pattern: '^[0-7,\\-\\*]+$' }
+        },
         additionalProperties: false
       }
     }
@@ -174,15 +181,15 @@ export const databaseRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
-    const { hour } = request.body as { hour: number }
+    const { hour, minute = 0, days = '*' } = request.body as { hour: number; minute?: number; days?: string }
     const cronPath = backupCronPath(site.domain)
 
     await fs.mkdir('/var/log/orchestrator', { recursive: true }).catch(() => {})
-    await fs.writeFile(cronPath, backupCronContent(site.domain, site.rootPath, hour), 'utf-8')
+    await fs.writeFile(cronPath, backupCronContent(site.domain, site.rootPath, hour, minute, days), 'utf-8')
     await exec(`chmod 644 "${cronPath}"`).catch(() => {})
 
-    app.audit('backup.schedule_enabled', { siteId: site.id, meta: { domain: site.domain, hour } })
-    return { ok: true, cronPath, hour }
+    app.audit('backup.schedule_enabled', { siteId: site.id, req: request, meta: { domain: site.domain, hour, minute, days } })
+    return { ok: true, cronPath, hour, minute, days }
   })
 
   app.delete('/:id/database/backup-schedule', async (request, reply) => {
