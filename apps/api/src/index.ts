@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import websocket from '@fastify/websocket'
+import multipart from '@fastify/multipart'
 import { prismaPlugin } from './plugins/prisma'
 import { jwtPlugin } from './plugins/auth'
 import { auditPlugin } from './plugins/audit'
@@ -28,6 +29,7 @@ import { failedJobsRoutes } from './routes/failed-jobs'
 import { phpFpmRoutes } from './routes/phpfpm'
 import { s3BackupRoutes } from './routes/s3backup'
 import { logsRoutes } from './routes/logs'
+import { fileManagerRoutes } from './routes/filemanager'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 
 const app = Fastify({
@@ -43,6 +45,7 @@ async function start() {
   await app.register(cors, { origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000' })
   await app.register(rateLimit, { global: false })
   await app.register(websocket)
+  await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } }) // 500MB max
   await app.register(prismaPlugin)
   await app.register(jwtPlugin)
   await app.register(auditPlugin)
@@ -75,6 +78,7 @@ async function start() {
   await app.register(phpFpmRoutes,      { prefix: '/api/sites' })
   await app.register(s3BackupRoutes,    { prefix: '/api/sites' })
   await app.register(logsRoutes,        { prefix: '/api/sites' })
+  await app.register(fileManagerRoutes, { prefix: '/api/sites' })
 
   app.get('/api/health', async () => ({ status: 'ok', ts: new Date() }))
 
