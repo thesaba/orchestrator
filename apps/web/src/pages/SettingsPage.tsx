@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from 'react'
 import { api, PanelSettings, s3Api } from '../api/client'
 import { useToast } from '../context/toast'
+import { useAuth } from '../context/AuthContext'
 
 const EMPTY: PanelSettings = {
   panel_title: '',
@@ -24,6 +25,7 @@ const EMPTY: PanelSettings = {
 
 export function SettingsPage() {
   const showToast = useToast()
+  const { isAdmin } = useAuth()
   const [settings,    setSettings]    = useState<PanelSettings>(EMPTY)
   const [loading,     setLoading]     = useState(true)
   const [savingGeneral, setSavingGeneral] = useState(false)
@@ -51,6 +53,11 @@ export function SettingsPage() {
   const [s3Endpoint,   setS3Endpoint]   = useState('')
   const [savingS3,     setSavingS3]     = useState(false)
 
+  // MySQL root credentials state
+  const [mysqlRootUser, setMysqlRootUser] = useState('')
+  const [mysqlRootPass, setMysqlRootPass] = useState('')
+  const [savingMysql,   setSavingMysql]   = useState(false)
+
   const saveS3 = async () => {
     setSavingS3(true)
     try {
@@ -70,11 +77,11 @@ export function SettingsPage() {
   useEffect(() => {
     api.settings.get().then((s) => {
       setSettings(s)
-      // Pre-fill non-sensitive S3 fields (secret is redacted by API)
-      if ((s as any).s3_access_key) setS3AccessKey((s as any).s3_access_key)
-      if ((s as any).s3_region)     setS3Region((s as any).s3_region)
-      if ((s as any).s3_bucket)     setS3Bucket((s as any).s3_bucket)
-      if ((s as any).s3_endpoint)   setS3Endpoint((s as any).s3_endpoint)
+      if ((s as any).s3_access_key)    setS3AccessKey((s as any).s3_access_key)
+      if ((s as any).s3_region)        setS3Region((s as any).s3_region)
+      if ((s as any).s3_bucket)        setS3Bucket((s as any).s3_bucket)
+      if ((s as any).s3_endpoint)      setS3Endpoint((s as any).s3_endpoint)
+      if ((s as any).mysql_root_user)  setMysqlRootUser((s as any).mysql_root_user)
     }).catch(() => {}).finally(() => setLoading(false))
     api.auth.me().then((u) => setTotpEnabled(u?.totpEnabled ?? false)).catch(() => {})
   }, [])
@@ -344,6 +351,60 @@ export function SettingsPage() {
             </BlockStack>
           </Card>
         </Layout.Section>
+
+        {/* ── MySQL Root Credentials (admin only) ───────────────────────── */}
+        {isAdmin && (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">MySQL Root Credentials</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Required to create and drop databases from the Database tab.
+                    Stored server-side only — never returned to the browser.
+                  </Text>
+                </BlockStack>
+                <TextField
+                  label="Root username"
+                  value={mysqlRootUser}
+                  onChange={setMysqlRootUser}
+                  autoComplete="off"
+                  placeholder="root"
+                />
+                <TextField
+                  label="Root password"
+                  type="password"
+                  value={mysqlRootPass}
+                  onChange={setMysqlRootPass}
+                  autoComplete="new-password"
+                  placeholder="Leave blank to keep existing password"
+                />
+                <InlineStack align="end">
+                  <Button
+                    variant="primary"
+                    loading={savingMysql}
+                    onClick={async () => {
+                      setSavingMysql(true)
+                      try {
+                        const data: Record<string, string> = { mysql_root_user: mysqlRootUser }
+                        if (mysqlRootPass) data.mysql_root_password = mysqlRootPass
+                        await api.settings.update(data as any)
+                        setMysqlRootPass('')
+                        showToast('MySQL credentials saved')
+                      } catch (err: unknown) {
+                        showToast(err instanceof Error ? err.message : 'Save failed', { error: true })
+                      } finally {
+                        setSavingMysql(false)
+                      }
+                    }}
+                  >
+                    Save credentials
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        )}
 
         {/* ── About ─────────────────────────────────────────────────────── */}
         <Layout.Section>
