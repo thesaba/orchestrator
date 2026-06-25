@@ -335,7 +335,10 @@ deployer ALL=(root) NOPASSWD: /usr/sbin/php-fpm[0-9].[0-9] -t
 deployer ALL=(root) NOPASSWD: /usr/bin/systemctl reload php[0-9].[0-9]-fpm
 deployer ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /tmp/cron-* /etc/cron.d/*
 deployer ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/cron.d/*
+deployer ALL=(root) NOPASSWD: /usr/bin/install -d -o www-data -g www-data -m 0750 /var/www/sites/*/shared/logs
 ```
+ბოლო ხაზი `supervisor.ts`-ის `ensureSharedLogsDir()`-ს სჭირდება: `provision.sh` ქმნის `shared/`-ს `www-data:www-data`-ით, mode `750`-ით, ანუ `deployer` იუზერს არ აქვს მასში ჩასაწერად უფლება — ამიტომ `worker.log`-ის დირექტორია (`shared/logs`) `CANT_REREAD`-ის გასარიდებლად მხოლოდ ამ sudoers წესით შეიქმნება, თუ პროცესი root-ით არ მუშაობს.
+
 შემდეგ `sudo visudo -c` შეამოწმე სინტაქსი. (თუ სერვისი უკვე root-ით მუშაობს — ეს ნაბიჯი არ გჭირდება, `sudo` root-იდან root-ზე ყოველთვის გაივლის.)
 
 ### 5.4 Web Terminal — გამორთულია default-ად

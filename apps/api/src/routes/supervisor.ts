@@ -7,6 +7,21 @@ const exec = promisify(execCb)
 
 const VALID_WORKER_ACTIONS = new Set(['start', 'stop', 'restart'])
 
+// shared/logs is created by provision.sh as www-data:www-data, mode 750 — the
+// orchestrator-api process runs as the unprivileged 'deployer' user, so a plain
+// fs.mkdir() here fails with EACCES (silently, if swallowed by .catch(() => {})).
+// Try the unprivileged path first (works if the API ever does run as root),
+// then fall back to a narrowly-scoped sudoers rule — see DEPLOY_GUIDE.md
+// §5.3 (/etc/sudoers.d/deployer-fpm) for the line this requires.
+async function ensureSharedLogsDir(rootPath: string): Promise<void> {
+  const dir = `${rootPath}/shared/logs`
+  try {
+    await fs.mkdir(dir, { recursive: true })
+  } catch {
+    await exec(`sudo /usr/bin/install -d -o www-data -g www-data -m 0750 "${dir}"`).catch(() => {})
+  }
+}
+
 export const supervisorRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
 
@@ -48,7 +63,7 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     // supervisord refuses to (re)read a config whose stdout_logfile directory
     // doesn't exist yet (CANT_REREAD). Sites provisioned before shared/logs
     // was added to provision.sh won't have it — create it defensively here.
-    await fs.mkdir(`${site.rootPath}/shared/logs`, { recursive: true }).catch(() => {})
+    await ensureSharedLogsDir(site.rootPath)
 
     await fs.writeFile(configPath, content, 'utf-8')
 
@@ -116,7 +131,7 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     if (action === 'start') {
       const configExists = await fs.access(configPath).catch(() => null)
       if (configExists === null) {
-        await fs.mkdir(`${site.rootPath}/shared/logs`, { recursive: true }).catch(() => {})
+        await ensureSharedLogsDir(site.rootPath)
         await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
         await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
       }
@@ -135,7 +150,7 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     if (!ok && output.includes('no such group')) {
       const configExists = await fs.access(configPath).catch(() => null)
       if (configExists === null) {
-        await fs.mkdir(`${site.rootPath}/shared/logs`, { recursive: true }).catch(() => {})
+        await ensureSharedLogsDir(site.rootPath)
         await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
         await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
         try {
