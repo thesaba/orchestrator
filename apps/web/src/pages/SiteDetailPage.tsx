@@ -20,7 +20,7 @@ import {
 } from '@shopify/polaris'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { api, ArtisanCommand, BackupFile, Deployment, Release, Site, maintenanceApi, logsApi, redeployApi } from '../api/client'
+import { api, ArtisanCommand, Deployment, Release, Site, maintenanceApi, logsApi, redeployApi } from '../api/client'
 import { ProvisionLog }      from '../components/ProvisionLog'
 import { ConfigEditor }      from '../components/ConfigEditor'
 import { WorkersTab }        from '../components/WorkersTab'
@@ -38,6 +38,8 @@ import { DeployHeatmap }     from '../components/DeployHeatmap'
 import { HealthScoreBadge }  from '../components/HealthScoreBadge'
 import { Breadcrumb }        from '../components/Breadcrumb'
 import { useToast } from '../context/toast'
+import { DatabaseTab }       from '../components/DatabaseTab'
+import { useAuth }           from '../context/AuthContext'
 
 const DESTRUCTIVE_ARTISAN = new Set([
   'migrate:rollback',
@@ -105,18 +107,6 @@ export function SiteDetailPage() {
   // Deployment log modal
   const [logModal, setLogModal] = useState<Deployment | null>(null)
 
-  // Database tab state
-  const [backups, setBackups]             = useState<BackupFile[]>([])
-  const [backupsLoaded, setBackupsLoaded] = useState(false)
-  const [creatingBackup, setCreatingBackup] = useState(false)
-  const [backupError, setBackupError]     = useState('')
-  const [deletingBackup, setDeletingBackup] = useState<string | null>(null)
-
-  // Backup schedule state
-  const [scheduleActive, setScheduleActive] = useState(false)
-  const [scheduleHour, setScheduleHour]     = useState(2)
-  const [scheduleLoaded, setScheduleLoaded] = useState(false)
-  const [savingSchedule, setSavingSchedule] = useState(false)
 
   // Artisan tab state
   const [artisanCommands, setArtisanCommands]               = useState<ArtisanCommand[]>([])
@@ -321,45 +311,6 @@ export function SiteDetailPage() {
     } finally { setMaintenanceLoading(false) }
   }
 
-  // Load backups + schedule when Database tab is selected
-  useEffect(() => {
-    if (tab !== TAB.DATABASE) return
-    if (!backupsLoaded) {
-      api.database.listBackups(siteId)
-        .then((r) => { setBackups(r.backups); setBackupsLoaded(true) })
-        .catch(() => {})
-    }
-    if (!scheduleLoaded) {
-      api.database.getBackupSchedule(siteId)
-        .then((s) => { setScheduleActive(s.active); setScheduleHour(s.hour); setScheduleLoaded(true) })
-        .catch(() => setScheduleLoaded(true))
-    }
-  }, [tab, siteId, backupsLoaded, scheduleLoaded])
-
-  const handleCreateBackup = async () => {
-    setCreatingBackup(true); setBackupError('')
-    try {
-      const result = await api.database.createBackup(siteId)
-      showToast(`Backup created: ${result.filename} (${result.sizeHuman})`)
-      const r = await api.database.listBackups(siteId)
-      setBackups(r.backups)
-    } catch (err: unknown) {
-      setBackupError(err instanceof Error ? err.message : 'Backup failed')
-    } finally { setCreatingBackup(false) }
-  }
-
-  const handleDeleteBackup = async (filename: string) => {
-    setDeletingBackup(filename)
-    try {
-      await api.database.deleteBackup(siteId, filename)
-      setBackups((prev) => prev.filter((b) => b.name !== filename))
-    } catch { /* ignore */ } finally { setDeletingBackup(null) }
-  }
-
-  const handleDownloadBackup = async (filename: string) => {
-    try { await api.database.downloadBackup(siteId, filename) } catch { /* ignore */ }
-  }
-
   // Load artisan command list when Artisan tab is first selected
   useEffect(() => {
     if (tab !== TAB.ARTISAN || artisanCommandsLoaded) return
@@ -412,23 +363,6 @@ export function SiteDetailPage() {
   const handleSaveEnv = useCallback(async () => {
     await api.config.saveEnv(siteId, envContent)
   }, [siteId, envContent])
-
-  const handleToggleSchedule = async (enable: boolean) => {
-    setSavingSchedule(true)
-    try {
-      if (enable) {
-        await api.database.enableBackupSchedule(siteId, scheduleHour)
-        setScheduleActive(true)
-        showToast(`Daily backup enabled at ${String(scheduleHour).padStart(2, '0')}:00 (server time)`)
-      } else {
-        await api.database.disableBackupSchedule(siteId)
-        setScheduleActive(false)
-        showToast('Scheduled backup disabled')
-      }
-    } catch {
-      showToast('Failed to update backup schedule', { error: true })
-    } finally { setSavingSchedule(false) }
-  }
 
   const handleDelete = async () => {
     setDeleting(true)
@@ -809,82 +743,8 @@ export function SiteDetailPage() {
           )}
 
           {/* Tab 4 — Database */}
-          {tab === TAB.DATABASE && (
-            <BlockStack gap="400">
-              <Card>
-                <BlockStack gap="500">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <BlockStack gap="100">
-                      <Text as="h3" variant="headingSm">MySQL Backups</Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        {site.dbName ? `Database: ${site.dbName}` : 'DB credentials are read from shared/.env'}
-                      </Text>
-                    </BlockStack>
-                    <Button variant="primary" onClick={handleCreateBackup} loading={creatingBackup} disabled={site.status !== 'active'}>
-                      Create Backup Now
-                    </Button>
-                  </InlineStack>
-
-                  {backupError && (
-                    <Banner tone="critical" onDismiss={() => setBackupError('')}>
-                      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '12px' }}>{backupError}</pre>
-                    </Banner>
-                  )}
-
-                  <Divider />
-
-                  {backups.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '32px 0' }}>
-                      <Text as="p" tone="subdued">No backups yet. Click "Create Backup Now" to make one.</Text>
-                    </div>
-                  ) : (
-                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                      <DataTable
-                        columnContentTypes={['text', 'numeric', 'text', 'text']}
-                        headings={['Filename', 'Size', 'Created', 'Actions']}
-                        rows={backups.map((b) => [
-                          <Text as="span" variant="bodySm" fontWeight="semibold">{b.name}</Text>,
-                          formatBytes(b.sizeBytes),
-                          new Date(b.createdAt).toLocaleString(),
-                          <InlineStack gap="200">
-                            <Button size="micro" onClick={() => handleDownloadBackup(b.name)}>Download</Button>
-                            <Button size="micro" tone="critical" loading={deletingBackup === b.name} onClick={() => handleDeleteBackup(b.name)}>Delete</Button>
-                          </InlineStack>
-                        ])}
-                      />
-                    </div>
-                  )}
-                </BlockStack>
-              </Card>
-
-              <Card>
-                <BlockStack gap="400">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <BlockStack gap="100">
-                      <Text as="h3" variant="headingSm">Automated Backup Schedule</Text>
-                      <Text as="p" variant="bodySm" tone="subdued">Runs daily via cron, keeps 30 most recent backups.</Text>
-                    </BlockStack>
-                    <Badge tone={scheduleActive ? 'success' : 'info'}>{scheduleActive ? 'Active' : 'Inactive'}</Badge>
-                  </InlineStack>
-                  <InlineStack gap="400" blockAlign="end">
-                    <div style={{ minWidth: 180 }}>
-                      <Select
-                        label="Run daily at (server time)"
-                        options={Array.from({ length: 24 }, (_, h) => ({ label: `${String(h).padStart(2, '0')}:00`, value: String(h) }))}
-                        value={String(scheduleHour)}
-                        onChange={(v) => setScheduleHour(Number(v))}
-                        disabled={scheduleActive}
-                      />
-                    </div>
-                    {scheduleActive ? (
-                      <Button tone="critical" loading={savingSchedule} onClick={() => handleToggleSchedule(false)}>Disable schedule</Button>
-                    ) : (
-                      <Button variant="primary" loading={savingSchedule} onClick={() => handleToggleSchedule(true)}>Enable schedule</Button>
-                    )}
-                  </InlineStack>
-                </BlockStack>
-              </Card>
-            </BlockStack>
+          {tab === TAB.DATABASE && site && (
+            <DatabaseTab siteId={siteId} site={site} />
           )}
 
           {/* Tab 5 — Artisan */}

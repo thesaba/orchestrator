@@ -19,8 +19,16 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     return { ...rest, hasGitToken: !!gitToken }
   }
 
-  app.get('/', async () => {
+  app.get('/', async (request) => {
+    const payload = request.user as { userId: number; role?: string }
+    const role = payload.role ?? 'admin'
+
+    const where = role === 'admin'
+      ? {}
+      : { siteUsers: { some: { userId: payload.userId } } }
+
     const sites = await app.prisma.site.findMany({
+      where,
       orderBy: [{ pinned: 'desc' }, { createdAt: 'desc' }],
       include: { deployments: { take: 1, orderBy: { createdAt: 'desc' } } }
     })
@@ -48,6 +56,7 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.post('/', {
+    preHandler: [app.requireRole(['admin'])],
     schema: {
       body: {
         type: 'object',
@@ -120,7 +129,7 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
   // prefix, and Fastify doesn't allow two plugins to declare the same
   // method+path under one prefix (FST_ERR_DUPLICATED_ROUTE).
 
-  app.delete('/:id', async (request, reply) => {
+  app.delete('/:id', { preHandler: [app.requireRole(['admin'])] }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const { cleanup } = request.query as { cleanup?: string }
 

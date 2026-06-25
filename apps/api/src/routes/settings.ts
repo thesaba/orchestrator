@@ -11,11 +11,14 @@ const ALLOWED_KEYS = new Set([
   's3_secret_key',
   's3_region',
   's3_bucket',
-  's3_endpoint'
+  's3_endpoint',
+  // MySQL root credentials (for creating/dropping databases)
+  'mysql_root_user',
+  'mysql_root_password'
 ])
 
 // These keys have their values redacted (write-only) in GET responses
-const REDACTED_KEYS = new Set(['s3_secret_key'])
+const REDACTED_KEYS = new Set(['s3_secret_key', 'mysql_root_password'])
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
@@ -29,7 +32,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     )
   })
 
-  app.put('/', async (request, reply) => {
+  app.put('/', { preHandler: [app.requireRole(['admin'])] }, async (request, reply) => {
     const body = request.body as Record<string, string>
     const allowed = Object.entries(body).filter(([k]) => ALLOWED_KEYS.has(k))
     if (allowed.length === 0) return reply.code(400).send({ error: 'No valid settings keys provided.' })

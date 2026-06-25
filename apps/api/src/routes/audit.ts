@@ -15,15 +15,20 @@ export const auditRoutes: FastifyPluginAsync = async (app) => {
         where,
         orderBy: { createdAt: 'desc' },
         take,
-        skip
+        skip,
+        include: {
+          user: { select: { email: true, role: true } }
+        }
       }),
       app.prisma.auditLog.count({ where })
     ])
 
     return {
-      logs: logs.map((l) => ({
+      logs: logs.map(({ user, ...l }) => ({
         ...l,
-        meta: l.meta ? JSON.parse(l.meta) : null
+        meta: l.meta ? JSON.parse(l.meta) : null,
+        userEmail: user?.email ?? null,
+        userRole:  user?.role  ?? null
       })),
       total,
       limit: take,

@@ -216,10 +216,10 @@ export const api = {
     // Download uses raw fetch (not JSON) — triggers browser download
     getBackupSchedule: (siteId: number) =>
       request<BackupSchedule>(`/sites/${siteId}/database/backup-schedule`),
-    enableBackupSchedule: (siteId: number, hour: number) =>
-      request<{ ok: boolean; cronPath: string; hour: number }>(
+    enableBackupSchedule: (siteId: number, opts: { hour: number; minute?: number; days?: string }) =>
+      request<{ ok: boolean; cronPath: string; hour: number; minute: number; days: string }>(
         `/sites/${siteId}/database/backup-schedule`,
-        { method: 'PUT', body: JSON.stringify({ hour }) }
+        { method: 'PUT', body: JSON.stringify(opts) }
       ),
     disableBackupSchedule: (siteId: number) =>
       request<{ ok: boolean }>(`/sites/${siteId}/database/backup-schedule`, { method: 'DELETE' }),
@@ -284,6 +284,8 @@ export interface CleanupResult {
 export interface BackupSchedule {
   active: boolean
   hour: number
+  minute: number
+  days: string
   cronPath: string
 }
 
@@ -292,6 +294,8 @@ export interface AuditEntry {
   action: string
   siteId: number | null
   userId: number | null
+  userEmail: string | null
+  userRole:  string | null
   meta: Record<string, unknown> | null
   createdAt: string
 }
@@ -671,5 +675,68 @@ export const fmApi = {
       xhr.send(formData)
     })
   }
+}
+
+// ── Database Management API ────────────────────────────────────────────────────
+
+export interface SiteDatabase {
+  id: number
+  siteId: number
+  dbName: string
+  dbUser: string
+  isPrimary: boolean
+  createdAt: string
+}
+
+export interface QueryResult {
+  columns: string[]
+  rows: unknown[][]
+  rowCount: number
+  truncated: boolean
+  elapsedMs: number
+}
+
+export const dbManageApi = {
+  list: (siteId: number) =>
+    request<{ databases: SiteDatabase[] }>(`/sites/${siteId}/databases`),
+  create: (siteId: number, data: { dbName: string; dbUser: string }) =>
+    request<SiteDatabase>(`/sites/${siteId}/databases`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+  remove: (siteId: number, dbId: number) =>
+    request<{ ok: boolean }>(`/sites/${siteId}/databases/${dbId}`, { method: 'DELETE' }),
+  runQuery: (siteId: number, dbId: number, sql: string) =>
+    request<QueryResult>(`/sites/${siteId}/databases/${dbId}/query`, {
+      method: 'POST',
+      body: JSON.stringify({ sql })
+    })
+}
+
+// ── Users / Team API ───────────────────────────────────────────────────────────
+
+export interface UserRecord {
+  id: number
+  email: string
+  role: 'admin' | 'developer' | 'viewer'
+  createdAt: string
+}
+
+export const usersApi = {
+  list: () =>
+    request<{ users: UserRecord[] }>('/users'),
+  create: (data: { email: string; password: string; role: string }) =>
+    request<UserRecord>('/users', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: { email?: string; role?: string }) =>
+    request<UserRecord>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remove: (id: number) =>
+    request<{ ok: boolean }>(`/users/${id}`, { method: 'DELETE' }),
+  getSites: (id: number) =>
+    request<{ siteIds: number[] }>(`/users/${id}/sites`),
+  setSites: (id: number, siteIds: number[]) =>
+    request<{ ok: boolean; siteIds: number[] }>(`/users/${id}/sites`, {
+      method: 'PUT',
+      body: JSON.stringify({ siteIds })
+    })
 }
 

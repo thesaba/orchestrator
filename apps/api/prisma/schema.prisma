@@ -8,43 +8,71 @@ datasource db {
 }
 
 model User {
-  id          Int      @id @default(autoincrement())
-  email       String   @unique
+  id          Int        @id @default(autoincrement())
+  email       String     @unique
   password    String
+  role        String     @default("admin") // "admin" | "developer" | "viewer"
   totpSecret  String?
-  totpEnabled Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  totpEnabled Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  siteUsers   SiteUser[]
+  auditLogs   AuditLog[]
 }
 
 model Site {
-  id              Int           @id @default(autoincrement())
+  id              Int            @id @default(autoincrement())
   name            String
-  domain          String        @unique
-  phpVersion      String        @default("8.2")
+  domain          String         @unique
+  phpVersion      String         @default("8.2")
   dbName          String?
   dbUser          String?
-  sslEnabled      Boolean       @default(false)
+  sslEnabled      Boolean        @default(false)
   rootPath        String
-  status          String        @default("pending")
+  status          String         @default("pending")
   repoUrl         String?
-  branch          String        @default("main")
-  webhookToken    String?       @unique
+  branch          String         @default("main")
+  webhookToken    String?        @unique
   gitToken        String?
   preDeploy       String?
   postDeploy      String?
-  healthCheck     Boolean       @default(false)
+  healthCheck     Boolean        @default(false)
   healthCheckUrl  String?
-  deployQueued    Boolean       @default(false)
-  maintenanceMode Boolean       @default(false)
-  uptimeMonitor   Boolean       @default(true)
-  // New fields
-  pinned          Boolean       @default(false)
-  tags            String        @default("[]")  // JSON string array
-  notes           String?                        // free-form notes
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  deployQueued    Boolean        @default(false)
+  maintenanceMode Boolean        @default(false)
+  uptimeMonitor   Boolean        @default(true)
+  pinned          Boolean        @default(false)
+  tags            String         @default("[]")
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
   deployments     Deployment[]
   uptimeChecks    UptimeCheck[]
+  siteUsers       SiteUser[]
+  databases       SiteDatabase[]
+}
+
+model SiteUser {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  siteId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, siteId])
+  @@index([siteId])
+}
+
+model SiteDatabase {
+  id        Int      @id @default(autoincrement())
+  siteId    Int
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  dbName    String   @unique
+  dbUser    String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([siteId])
 }
 
 model UptimeCheck {
@@ -64,6 +92,7 @@ model AuditLog {
   action    String
   siteId    Int?
   userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   meta      String?
   createdAt DateTime @default(now())
 }
@@ -82,6 +111,6 @@ model Deployment {
   branch    String   @default("main")
   status    String   @default("pending")
   log       String?
-  comment   String?  // user-provided deploy comment
+  comment   String?
   createdAt DateTime @default(now())
 }
