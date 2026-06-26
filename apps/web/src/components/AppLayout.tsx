@@ -5,7 +5,7 @@ import {
   DatabaseIcon, WandIcon, BugIcon, ShieldCheckMarkIcon,
   WrenchIcon, ListBulletedIcon, AutomationIcon, PackageIcon,
   CodeAddIcon, FolderIcon, ClipboardChecklistIcon, PinIcon,
-  RefreshIcon, TeamIcon
+  RefreshIcon, TeamIcon, CalendarIcon, NoteIcon
 } from '@shopify/polaris-icons'
 import { ReactNode, useState, useCallback, useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useMatch, useSearchParams } from 'react-router-dom'
@@ -313,6 +313,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
             { label: 'Monitoring', icon: ChartVerticalIcon, url: '/monitoring' },
             { label: 'Settings',   icon: SettingsIcon,      url: '/settings' },
             ...(isAdmin ? [{ label: 'Team', icon: TeamIcon, url: '/team' }] : []),
+          ]}
+        />
+
+        <Navigation.Section
+          title="Workspace"
+          items={[
+            { label: 'Tasks',    icon: ClipboardChecklistIcon, url: '/tasks' },
+            { label: 'Notes',    icon: NoteIcon,                url: '/notes' },
+            { label: 'Calendar', icon: CalendarIcon,            url: '/calendar' },
           ]}
         />
 
