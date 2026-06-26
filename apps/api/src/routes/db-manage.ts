@@ -2,10 +2,12 @@ import { FastifyPluginAsync } from 'fastify'
 import { exec as execCb } from 'child_process'
 import { promisify } from 'util'
 import { promises as fs } from 'fs'
+import { randomBytes } from 'crypto'
 import os from 'os'
 import path from 'path'
 import mysql from 'mysql2/promise'
 import { PrismaClient } from '@prisma/client'
+import { createPmaToken } from '../lib/pma-tokens'
 
 const exec = promisify(execCb)
 
@@ -35,6 +37,25 @@ async function readEnvCreds(
   } catch {
     return null
   }
+}
+
+// Primary databases (created during provisioning) have their credentials in
+// shared/.env. Secondary databases (created via the panel) have their own
+// generated password stored in SiteDatabase.dbPass — the site's primary .env
+// user has no grant on them, so we must NOT fall back to readEnvCreds here.
+export async function resolveDbCreds(
+  site: { rootPath: string },
+  db: { isPrimary: boolean; dbUser: string; dbPass: string }
+): Promise<{ user: string; pass: string } | null> {
+  if (db.isPrimary) {
+    const creds = await readEnvCreds(site.rootPath)
+    return creds ? { user: creds.user, pass: creds.pass } : null
+  }
+  return { user: db.dbUser, pass: db.dbPass }
+}
+
+function generatePassword(): string {
+  return randomBytes(24).toString('base64').replace(/[/+=]/g, '').slice(0, 28)
 }
 
 // Connect as root and run multiple admin statements safely (no shell, no backtick issues)
@@ -97,7 +118,8 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
 
     const databases = await app.prisma.siteDatabase.findMany({
       where: { siteId },
-      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }]
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      select: { id: true, siteId: true, dbName: true, dbUser: true, isPrimary: true, createdAt: true }
     })
     return { databases }
   })
@@ -134,12 +156,23 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
     const existing = await app.prisma.siteDatabase.findUnique({ where: { dbName } })
     if (existing) return reply.code(409).send({ error: `Database "${dbName}" already exists.` })
 
+    // Secondary databases get their own generated password — the site's
+    // primary .env user has no grant on them, so they can't share creds.
+    const dbPass = generatePassword()
+
     try {
-      // Use mysql2 directly — avoids bash backtick-as-command-substitution issues
+      // Use mysql2 directly — avoids bash backtick-as-command-substitution issues.
+      // Both 'localhost' (unix socket) and '127.0.0.1' (TCP) hosts are granted —
+      // MySQL treats them as distinct grantees, and the panel/phpMyAdmin connect
+      // over TCP to 127.0.0.1, so a 'localhost'-only grant silently fails those.
       await withRootConn(rootCreds, async (conn) => {
         await conn.execute(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``)
-        await conn.execute(`CREATE USER IF NOT EXISTS '${dbUser}'@'localhost'`)
+        await conn.execute(`CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPass}'`)
+        await conn.execute(`CREATE USER IF NOT EXISTS '${dbUser}'@'127.0.0.1' IDENTIFIED BY '${dbPass}'`)
+        await conn.execute(`ALTER USER '${dbUser}'@'localhost' IDENTIFIED BY '${dbPass}'`)
+        await conn.execute(`ALTER USER '${dbUser}'@'127.0.0.1' IDENTIFIED BY '${dbPass}'`)
         await conn.execute(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'localhost'`)
+        await conn.execute(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'127.0.0.1'`)
         await conn.execute('FLUSH PRIVILEGES')
       })
     } catch (err: unknown) {
@@ -151,7 +184,8 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const db = await app.prisma.siteDatabase.create({
-      data: { siteId, dbName, dbUser, isPrimary: false }
+      data: { siteId, dbName, dbUser, dbPass, isPrimary: false },
+      select: { id: true, siteId: true, dbName: true, dbUser: true, isPrimary: true, createdAt: true }
     })
 
     app.audit('database.created', { siteId, req: request, meta: { dbName, dbUser } })
@@ -179,6 +213,7 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
       await withRootConn(rootCreds, async (conn) => {
         await conn.execute(`DROP DATABASE IF EXISTS \`${db.dbName}\``)
         await conn.execute(`DROP USER IF EXISTS '${db.dbUser}'@'localhost'`)
+        await conn.execute(`DROP USER IF EXISTS '${db.dbUser}'@'127.0.0.1'`)
         await conn.execute('FLUSH PRIVILEGES')
       })
     } catch (err: unknown) {
@@ -223,7 +258,7 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: validation.reason })
     }
 
-    const creds = await readEnvCreds(site.rootPath)
+    const creds = await resolveDbCreds(site, db)
     if (!creds) {
       return reply.code(400).send({
         error: 'Cannot read database credentials from shared/.env'
@@ -349,5 +384,40 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
     } finally {
       await fs.unlink(tmpFile).catch(() => {})
     }
+  })
+
+  // POST /api/sites/:id/databases/:dbId/pma-session — issue a single-use
+  // phpMyAdmin signon link for this specific database. The actual MySQL
+  // password never leaves this server: we hand the browser an opaque
+  // token, and the phpMyAdmin signon bridge fetches the real credentials
+  // via a loopback call to /api/internal/pma-consume (see pma-internal.ts).
+  app.post('/:id/databases/:dbId/pma-session', async (request, reply) => {
+    const siteId = Number((request.params as { id: string; dbId: string }).id)
+    const dbId   = Number((request.params as { id: string; dbId: string }).dbId)
+
+    const pmaBaseUrl = process.env.PMA_BASE_URL
+    if (!pmaBaseUrl || !process.env.PMA_BRIDGE_SECRET) {
+      return reply.code(503).send({
+        error: 'phpMyAdmin SSO is not configured on this server.',
+        details: 'Set PMA_BASE_URL and PMA_BRIDGE_SECRET in the API environment.'
+      })
+    }
+
+    const site = await app.prisma.site.findUnique({ where: { id: siteId } })
+    if (!site) return reply.code(404).send({ error: 'Site not found' })
+
+    const db = await app.prisma.siteDatabase.findUnique({ where: { id: dbId } })
+    if (!db || db.siteId !== siteId) return reply.code(404).send({ error: 'Database not found' })
+
+    const creds = await resolveDbCreds(site, db)
+    if (!creds) {
+      return reply.code(400).send({ error: 'Cannot resolve database credentials.' })
+    }
+
+    const token = createPmaToken({ host: '127.0.0.1', user: creds.user, pass: creds.pass, db: db.dbName })
+
+    app.audit('database.pma_session_created', { siteId, req: request, meta: { dbName: db.dbName } })
+
+    return { url: `${pmaBaseUrl.replace(/\/$/, '')}/signon.php?token=${token}` }
   })
 }

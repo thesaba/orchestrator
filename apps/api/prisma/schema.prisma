@@ -69,6 +69,10 @@ model SiteDatabase {
   site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
   dbName    String   @unique
   dbUser    String
+  // Plaintext, same trust model as Setting.mysql_root_password and shared/.env.
+  // Never returned by GET endpoints — selected out explicitly in db-manage.ts.
+  // Empty for isPrimary rows; primary credentials live in shared/.env instead.
+  dbPass    String   @default("")
   isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
 

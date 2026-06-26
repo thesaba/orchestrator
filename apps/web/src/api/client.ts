@@ -727,7 +727,9 @@ export const dbManageApi = {
       throw new Error(err.error ?? `HTTP ${res.status}`)
     }
     return res.json()
-  }
+  },
+  openPma: (siteId: number, dbId: number) =>
+    request<{ url: string }>(`/sites/${siteId}/databases/${dbId}/pma-session`, { method: 'POST' })
 }
 
 // ── Users / Team API ───────────────────────────────────────────────────────────

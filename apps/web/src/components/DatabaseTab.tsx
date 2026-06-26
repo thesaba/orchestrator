@@ -41,6 +41,7 @@ export function DatabaseTab({ siteId, site }: Props) {
   const [addDbSaving,   setAddDbSaving]   = useState(false)
   const [addDbError,    setAddDbError]    = useState('')
   const [deletingDb,    setDeletingDb]    = useState<number | null>(null)
+  const [pmaLoadingId,  setPmaLoadingId]  = useState<number | null>(null)
   const [queryDb,       setQueryDb]       = useState<SiteDatabase | null>(null)
   const [importDb,      setImportDb]      = useState<SiteDatabase | null>(null)
   const [importFile,    setImportFile]    = useState<File | null>(null)
@@ -112,6 +113,18 @@ export function DatabaseTab({ siteId, site }: Props) {
       setAddDbSaving(false)
     }
   }, [siteId, addDbName, addDbUser])
+
+  const handleOpenPma = useCallback(async (db: SiteDatabase) => {
+    setPmaLoadingId(db.id)
+    try {
+      const { url } = await dbManageApi.openPma(siteId, db.id)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (e: unknown) {
+      alert((e as Error).message)
+    } finally {
+      setPmaLoadingId(null)
+    }
+  }, [siteId])
 
   const handleDeleteDb = useCallback(async (db: SiteDatabase) => {
     if (!confirm(`Drop database "${db.dbName}" and user "${db.dbUser}"? This cannot be undone.`)) return
@@ -258,6 +271,9 @@ export function DatabaseTab({ siteId, site }: Props) {
                 <InlineStack gap="200">
                   <Button size="micro" onClick={() => setQueryDb(db)}>Query</Button>
                   <Button size="micro" onClick={() => { setImportDb(db); setImportFile(null); setImportError(''); setImportWarning('') }}>Import</Button>
+                  <Button size="micro" loading={pmaLoadingId === db.id} onClick={() => handleOpenPma(db)}>
+                    phpMyAdmin
+                  </Button>
                   {isAdmin && !db.isPrimary && (
                     <Button
                       size="micro"
