@@ -710,7 +710,24 @@ export const dbManageApi = {
     request<QueryResult>(`/sites/${siteId}/databases/${dbId}/query`, {
       method: 'POST',
       body: JSON.stringify({ sql })
+    }),
+  importSql: async (siteId: number, dbId: number, file: File): Promise<{ ok: boolean; warnings: string | null }> => {
+    const token = localStorage.getItem(TOKEN_KEY)
+    const form = new FormData()
+    form.append('file', file)
+    // Must NOT set Content-Type — browser auto-sets multipart/form-data with boundary
+    const res = await fetch(`/api/sites/${siteId}/databases/${dbId}/import`, {
+      method: 'POST',
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
     })
+    if (res.status === 401) { localStorage.removeItem(TOKEN_KEY); window.location.href = '/login' }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(err.error ?? `HTTP ${res.status}`)
+    }
+    return res.json()
+  }
 }
 
 // ── Users / Team API ───────────────────────────────────────────────────────────
