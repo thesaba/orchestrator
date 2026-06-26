@@ -135,11 +135,16 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
     if (existing) return reply.code(409).send({ error: `Database "${dbName}" already exists.` })
 
     try {
-      // Use mysql2 directly — avoids bash backtick-as-command-substitution issues
+      // Use mysql2 directly — avoids bash backtick-as-command-substitution issues.
+      // Both 'localhost' (unix socket) and '127.0.0.1' (TCP) hosts are granted —
+      // MySQL treats them as distinct grantees, and the panel/phpMyAdmin connect
+      // over TCP to 127.0.0.1, so a 'localhost'-only grant silently fails those.
       await withRootConn(rootCreds, async (conn) => {
         await conn.execute(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``)
         await conn.execute(`CREATE USER IF NOT EXISTS '${dbUser}'@'localhost'`)
+        await conn.execute(`CREATE USER IF NOT EXISTS '${dbUser}'@'127.0.0.1'`)
         await conn.execute(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'localhost'`)
+        await conn.execute(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'127.0.0.1'`)
         await conn.execute('FLUSH PRIVILEGES')
       })
     } catch (err: unknown) {
@@ -179,6 +184,7 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
       await withRootConn(rootCreds, async (conn) => {
         await conn.execute(`DROP DATABASE IF EXISTS \`${db.dbName}\``)
         await conn.execute(`DROP USER IF EXISTS '${db.dbUser}'@'localhost'`)
+        await conn.execute(`DROP USER IF EXISTS '${db.dbUser}'@'127.0.0.1'`)
         await conn.execute('FLUSH PRIVILEGES')
       })
     } catch (err: unknown) {

@@ -33,8 +33,13 @@ log "  Root: $SITE_DIR"
 # ── 2. MySQL ─────────────────────────────────────────────────────────────────
 log "[2/4] Creating MySQL database and user..."
 sudo mysql -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+# Both 'localhost' (unix socket) and '127.0.0.1' (TCP) hosts are needed —
+# MySQL treats them as distinct grantees. The panel (and phpMyAdmin) connect
+# over TCP to 127.0.0.1, so a 'localhost'-only grant silently fails those.
 sudo mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';"
+sudo mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';"
 sudo mysql -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';"
+sudo mysql -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1';"
 sudo mysql -e "FLUSH PRIVILEGES;"
 log "  DB: $DB_NAME  User: $DB_USER"
 
