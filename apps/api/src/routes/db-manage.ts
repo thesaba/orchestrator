@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { exec as execCb } from 'child_process'
 import { promisify } from 'util'
 import { promises as fs } from 'fs'
+import os from 'os'
 import path from 'path'
 import mysql from 'mysql2/promise'
 import { PrismaClient } from '@prisma/client'
@@ -33,6 +34,25 @@ async function readEnvCreds(
     return { user: get('DB_USERNAME'), pass: get('DB_PASSWORD'), db: get('DB_DATABASE') }
   } catch {
     return null
+  }
+}
+
+// Connect as root and run multiple admin statements safely (no shell, no backtick issues)
+async function withRootConn(
+  creds: { user: string; pass: string },
+  fn: (conn: mysql.Connection) => Promise<void>
+): Promise<void> {
+  const conn = await mysql.createConnection({
+    host: '127.0.0.1',
+    user: creds.user,
+    password: creds.pass,
+    multipleStatements: false,
+    connectTimeout: 10_000
+  })
+  try {
+    await fn(conn)
+  } finally {
+    await conn.end().catch(() => {})
   }
 }
 
@@ -111,30 +131,22 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
       })
     }
 
-    // Check if database already exists in our records
     const existing = await app.prisma.siteDatabase.findUnique({ where: { dbName } })
     if (existing) return reply.code(409).send({ error: `Database "${dbName}" already exists.` })
 
-    // Read site's .env to get the password for the new DB user (reuse site pattern or generate)
-    const siteCreds = await readEnvCreds(site.rootPath)
-
     try {
-      const sql = [
-        `CREATE DATABASE IF NOT EXISTS \`${dbName}\`;`,
-        `CREATE USER IF NOT EXISTS '${dbUser}'@'localhost';`,
-        `GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'localhost';`,
-        'FLUSH PRIVILEGES;'
-      ].join(' ')
-
-      await exec(`mysql -u"${rootCreds.user}" -e "${sql.replace(/"/g, '\\"')}"`, {
-        env: { ...process.env, MYSQL_PWD: rootCreds.pass },
-        shell: '/bin/bash'
+      // Use mysql2 directly — avoids bash backtick-as-command-substitution issues
+      await withRootConn(rootCreds, async (conn) => {
+        await conn.execute(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``)
+        await conn.execute(`CREATE USER IF NOT EXISTS '${dbUser}'@'localhost'`)
+        await conn.execute(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'localhost'`)
+        await conn.execute('FLUSH PRIVILEGES')
       })
     } catch (err: unknown) {
-      const e = err as { stderr?: string; message?: string }
+      const e = err as { message?: string; code?: string }
       return reply.code(500).send({
         error: 'Failed to create database',
-        details: e.stderr ?? e.message ?? ''
+        details: e.message ?? ''
       })
     }
 
@@ -164,21 +176,16 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
-      const sql = [
-        `DROP DATABASE IF EXISTS \`${db.dbName}\`;`,
-        `DROP USER IF EXISTS '${db.dbUser}'@'localhost';`,
-        'FLUSH PRIVILEGES;'
-      ].join(' ')
-
-      await exec(`mysql -u"${rootCreds.user}" -e "${sql.replace(/"/g, '\\"')}"`, {
-        env: { ...process.env, MYSQL_PWD: rootCreds.pass },
-        shell: '/bin/bash'
+      await withRootConn(rootCreds, async (conn) => {
+        await conn.execute(`DROP DATABASE IF EXISTS \`${db.dbName}\``)
+        await conn.execute(`DROP USER IF EXISTS '${db.dbUser}'@'localhost'`)
+        await conn.execute('FLUSH PRIVILEGES')
       })
     } catch (err: unknown) {
-      const e = err as { stderr?: string; message?: string }
+      const e = err as { message?: string; code?: string }
       return reply.code(500).send({
         error: 'Failed to drop database',
-        details: e.stderr ?? e.message ?? ''
+        details: e.message ?? ''
       })
     }
 
@@ -266,6 +273,81 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
       })
     } finally {
       if (conn) await conn.end().catch(() => {})
+    }
+  })
+
+  // POST /api/sites/:id/databases/:dbId/import — import a .sql or .sql.gz file
+  app.post('/:id/databases/:dbId/import', {
+    preHandler: [app.requireRole(['admin', 'developer'])],
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } }
+  }, async (request, reply) => {
+    const siteId = Number((request.params as { id: string; dbId: string }).id)
+    const dbId   = Number((request.params as { id: string; dbId: string }).dbId)
+
+    const site = await app.prisma.site.findUnique({ where: { id: siteId } })
+    if (!site) return reply.code(404).send({ error: 'Site not found' })
+
+    const db = await app.prisma.siteDatabase.findUnique({ where: { id: dbId } })
+    if (!db || db.siteId !== siteId) return reply.code(404).send({ error: 'Database not found' })
+
+    const rootCreds = await getMysqlRootCreds(app.prisma)
+    if (!rootCreds) {
+      return reply.code(400).send({ error: 'MySQL root credentials not configured.' })
+    }
+
+    let data: import('@fastify/multipart').MultipartFile | undefined
+    try {
+      data = await request.file()
+    } catch {
+      return reply.code(400).send({ error: 'No file uploaded.' })
+    }
+    if (!data) return reply.code(400).send({ error: 'No file uploaded.' })
+
+    const filename = data.filename ?? ''
+    const isGzip = filename.endsWith('.sql.gz') || filename.endsWith('.gz')
+    const isSql  = filename.endsWith('.sql')
+
+    if (!isGzip && !isSql) {
+      return reply.code(400).send({ error: 'Only .sql and .sql.gz files are supported.' })
+    }
+
+    const tmpFile = path.join(os.tmpdir(), `db-import-${Date.now()}-${Math.random().toString(36).slice(2)}${isGzip ? '.sql.gz' : '.sql'}`)
+
+    try {
+      const chunks: Buffer[] = []
+      for await (const chunk of data.file) {
+        chunks.push(chunk as Buffer)
+      }
+      await fs.writeFile(tmpFile, Buffer.concat(chunks))
+
+      // Shell exec for piped import — dbName is a safe positional arg (no backtick issue)
+      const mysqlBase = `mysql -h 127.0.0.1 -u "${rootCreds.user}" "${db.dbName}"`
+      const cmd = isGzip
+        ? `zcat "${tmpFile}" | ${mysqlBase}`
+        : `${mysqlBase} < "${tmpFile}"`
+
+      const { stderr } = await exec(cmd, {
+        env: { ...process.env, MYSQL_PWD: rootCreds.pass },
+        shell: '/bin/bash',
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 300_000  // 5 min for large imports
+      })
+
+      app.audit('db.import', {
+        siteId,
+        req: request,
+        meta: { dbName: db.dbName, filename }
+      })
+
+      return { ok: true, warnings: stderr || null }
+    } catch (err: unknown) {
+      const e = err as { stderr?: string; message?: string }
+      return reply.code(500).send({
+        error: 'Import failed',
+        details: e.stderr?.slice(0, 2000) ?? e.message ?? ''
+      })
+    } finally {
+      await fs.unlink(tmpFile).catch(() => {})
     }
   })
 }

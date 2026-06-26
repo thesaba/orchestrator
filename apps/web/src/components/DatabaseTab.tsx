@@ -42,6 +42,11 @@ export function DatabaseTab({ siteId, site }: Props) {
   const [addDbError,    setAddDbError]    = useState('')
   const [deletingDb,    setDeletingDb]    = useState<number | null>(null)
   const [queryDb,       setQueryDb]       = useState<SiteDatabase | null>(null)
+  const [importDb,      setImportDb]      = useState<SiteDatabase | null>(null)
+  const [importFile,    setImportFile]    = useState<File | null>(null)
+  const [importing,     setImporting]     = useState(false)
+  const [importError,   setImportError]   = useState('')
+  const [importWarning, setImportWarning] = useState('')
 
   // ── Backups ──────────────────────────────────────────────────────────────
   const [backups,        setBackups]        = useState<BackupFile[]>([])
@@ -120,6 +125,25 @@ export function DatabaseTab({ siteId, site }: Props) {
       setDeletingDb(null)
     }
   }, [siteId])
+
+  const handleImport = useCallback(async () => {
+    if (!importDb || !importFile) return
+    setImporting(true)
+    setImportError('')
+    setImportWarning('')
+    try {
+      const res = await dbManageApi.importSql(siteId, importDb.id, importFile)
+      if (res.warnings) setImportWarning(res.warnings)
+      else {
+        setImportDb(null)
+        setImportFile(null)
+      }
+    } catch (e: unknown) {
+      setImportError((e as Error).message)
+    } finally {
+      setImporting(false)
+    }
+  }, [siteId, importDb, importFile])
 
   // ── Backup ────────────────────────────────────────────────────────────────
   const handleCreateBackup = useCallback(async () => {
@@ -233,6 +257,7 @@ export function DatabaseTab({ siteId, site }: Props) {
                 new Date(db.createdAt).toLocaleDateString(),
                 <InlineStack gap="200">
                   <Button size="micro" onClick={() => setQueryDb(db)}>Query</Button>
+                  <Button size="micro" onClick={() => { setImportDb(db); setImportFile(null); setImportError(''); setImportWarning('') }}>Import</Button>
                   {isAdmin && !db.isPrimary && (
                     <Button
                       size="micro"
@@ -430,6 +455,72 @@ export function DatabaseTab({ siteId, site }: Props) {
           db={queryDb}
         />
       )}
+
+      {/* ── Import SQL Modal ── */}
+      <Modal
+        open={!!importDb}
+        onClose={() => { setImportDb(null); setImportFile(null); setImportError(''); setImportWarning('') }}
+        title={`Import SQL — ${importDb?.dbName ?? ''}`}
+        primaryAction={{
+          content: importing ? 'Importing…' : 'Import',
+          onAction: handleImport,
+          loading: importing,
+          disabled: !importFile
+        }}
+        secondaryActions={[{
+          content: 'Cancel',
+          onAction: () => { setImportDb(null); setImportFile(null); setImportError(''); setImportWarning('') }
+        }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            {importError && (
+              <Banner tone="critical" title="Import failed">
+                <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  {importError}
+                </pre>
+              </Banner>
+            )}
+            {importWarning && (
+              <Banner tone="warning" title="Import completed with warnings">
+                <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  {importWarning}
+                </pre>
+              </Banner>
+            )}
+            {!importWarning && (
+              <>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Upload a <strong>.sql</strong> or <strong>.sql.gz</strong> dump file.
+                  All statements will be executed against <strong>{importDb?.dbName}</strong> using root credentials.
+                  Existing data will not be dropped unless your dump includes DROP TABLE statements.
+                </Text>
+                <div>
+                  <input
+                    type="file"
+                    accept=".sql,.sql.gz,.gz"
+                    style={{ display: 'block', marginTop: 8 }}
+                    onChange={e => {
+                      setImportFile(e.target.files?.[0] ?? null)
+                      setImportError('')
+                    }}
+                  />
+                  {importFile && (
+                    <Text as="p" variant="bodySm" tone="subdued" >
+                      {importFile.name} ({(importFile.size / 1024 / 1024).toFixed(2)} MB)
+                    </Text>
+                  )}
+                </div>
+              </>
+            )}
+            {importWarning && (
+              <Button onClick={() => { setImportDb(null); setImportFile(null); setImportWarning('') }}>
+                Close
+              </Button>
+            )}
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
     </BlockStack>
   )
 }
