@@ -295,16 +295,19 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const isSiteTab  = (slug: string) => pathname === `/sites/${currentSite?.id}` && searchParams.get('tab') === slug
 
   const navContent = (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-      {/* ── Global site selector ── */}
-      <SiteSelector
-        allSites={allSites}
-        currentSite={currentSite}
-        onSelect={(id) => navigate(`/sites/${id}`)}
-        onAddNew={() => navigate('/sites/new')}
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {/* ── Global site selector (fixed, never scrolls) ── */}
+      <div style={{ flexShrink: 0 }}>
+        <SiteSelector
+          allSites={allSites}
+          currentSite={currentSite}
+          onSelect={(id) => navigate(`/sites/${id}`)}
+          onAddNew={() => navigate('/sites/new')}
+        />
+      </div>
 
-      {/* ── Navigation sections ── */}
+      {/* ── Navigation sections (scrolls independently once content overflows) ── */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }}>
       <Navigation location={pathname + (currentSite ? `?tab=${searchParams.get('tab') ?? 'deploys'}` : '')}>
         <Navigation.Section
           items={[
@@ -384,6 +387,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </>
         )}
       </Navigation>
+      </div>
     </div>
   )
 
