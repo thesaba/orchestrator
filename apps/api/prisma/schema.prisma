@@ -58,7 +58,7 @@ model Site {
   siteUsers       SiteUser[]
   databases       SiteDatabase[]
   tasks           Task[]
-  notes           Note[]
+  noteEntries     Note[]
   calendarEvents  CalendarEvent[]
 }
 
