@@ -33,6 +33,7 @@ import { phpFpmRoutes } from './routes/phpfpm'
 import { s3BackupRoutes } from './routes/s3backup'
 import { logsRoutes } from './routes/logs'
 import { fileManagerRoutes } from './routes/filemanager'
+import { pmaInternalRoutes } from './routes/pma-internal'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 
 const app = Fastify({
@@ -85,6 +86,11 @@ async function start() {
   await app.register(fileManagerRoutes, { prefix: '/api/sites' })
   await app.register(dbManageRoutes,    { prefix: '/api/sites' })
   await app.register(usersRoutes,       { prefix: '/api/users' })
+
+  // Loopback-only, shared-secret-protected — used by the phpMyAdmin signon
+  // bridge to redeem a one-time token for real DB credentials. See
+  // routes/pma-internal.ts for why this doesn't use app.authenticate.
+  await app.register(pmaInternalRoutes, { prefix: '/api/internal' })
 
   app.get('/api/health', async () => ({ status: 'ok', ts: new Date() }))
 
