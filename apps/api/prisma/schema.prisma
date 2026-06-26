@@ -49,6 +49,7 @@ model Site {
   maintenanceMode Boolean        @default(false)
   uptimeMonitor   Boolean        @default(true)
   pinned          Boolean        @default(false)
+  disabled        Boolean        @default(false) // serving toggled off via Nginx (distinct from maintenanceMode)
   tags            String         @default("[]")
   notes           String?
   createdAt       DateTime       @default(now())

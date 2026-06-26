@@ -63,6 +63,7 @@ export function SiteDetailPage() {
   const { id } = useParams<{ id: string }>()
   const siteId = Number(id)
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
 
   const [site, setSite]       = useState<Site | null>(null)
   const [loading, setLoading] = useState(true)
@@ -97,6 +98,17 @@ export function SiteDetailPage() {
   const [maintenanceSecret, setMaintenanceSecret] = useState('')
   const [maintenanceLoading, setMaintenanceLoading] = useState(false)
   const [maintenanceError, setMaintenanceError]     = useState('')
+
+  // Site identity (name / domain rename)
+  const [identityName, setIdentityName]     = useState('')
+  const [identityDomain, setIdentityDomain] = useState('')
+  const [savingIdentity, setSavingIdentity] = useState(false)
+  const [identityError, setIdentityError]   = useState('')
+  const [renameConfirmOpen, setRenameConfirmOpen] = useState(false)
+
+  // Enable / disable serving
+  const [togglingEnabled, setTogglingEnabled] = useState(false)
+  const [disableConfirmOpen, setDisableConfirmOpen] = useState(false)
 
   // Delete modal
   const [deleteOpen, setDeleteOpen]     = useState(false)
@@ -151,6 +163,8 @@ export function SiteDetailPage() {
       setHealthCheck(s.healthCheck)
       setHealthCheckUrl(s.healthCheckUrl ?? '')
       setMaintenanceMode(s.maintenanceMode)
+      setIdentityName(s.name)
+      setIdentityDomain(s.domain)
       if (s.deployments.some((d) => d.status === 'running') && !deploying) {
         setDeploying(true)
       }
@@ -298,6 +312,51 @@ export function SiteDetailPage() {
     await fetchSite()
   }
 
+  // Site identity (name / domain)
+  const identityDirty = !!site && (identityName !== site.name || identityDomain !== site.domain)
+  const domainDirty   = !!site && identityDomain !== site.domain
+
+  const doSaveIdentity = async () => {
+    if (!site) return
+    setSavingIdentity(true); setIdentityError('')
+    try {
+      const updated = await api.sites.update(siteId, {
+        ...(identityName   !== site.name   ? { name: identityName }     : {}),
+        ...(identityDomain !== site.domain ? { domain: identityDomain } : {})
+      })
+      if (updated.renameLog) console.info('[rename]', updated.renameLog)
+      showToast(domainDirty ? `Domain changed to ${updated.domain}` : 'Name updated')
+      await fetchSite()
+      if (domainDirty) navigate(`/sites/${siteId}?tab=${TAB.SETTINGS}`, { replace: true })
+    } catch (err: unknown) {
+      setIdentityError(err instanceof Error ? err.message : 'Save failed')
+    } finally { setSavingIdentity(false); setRenameConfirmOpen(false) }
+  }
+
+  const handleSaveIdentity = () => {
+    if (domainDirty) setRenameConfirmOpen(true)
+    else doSaveIdentity()
+  }
+
+  // Enable / disable serving
+  const doToggleEnabled = async () => {
+    if (!site) return
+    setTogglingEnabled(true)
+    try {
+      await api.sites.update(siteId, { disabled: !site.disabled })
+      showToast(site.disabled ? 'Site enabled' : 'Site disabled — it will stop serving traffic')
+      await fetchSite()
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Failed to update', { error: true })
+    } finally { setTogglingEnabled(false); setDisableConfirmOpen(false) }
+  }
+
+  const handleToggleEnabled = () => {
+    if (!site) return
+    if (!site.disabled) setDisableConfirmOpen(true) // confirm before disabling; re-enabling is safe to do immediately
+    else doToggleEnabled()
+  }
+
   // Maintenance toggle
   const handleMaintenance = async (action: 'down' | 'up') => {
     setMaintenanceLoading(true); setMaintenanceError('')
@@ -410,6 +469,12 @@ export function SiteDetailPage() {
       }
       secondaryActions={[
         { content: site.sslEnabled ? '🔒 SSL' : 'SSL', onAction: () => setTab(TAB.SSL) },
+        ...(isAdmin ? [{
+          content: site.disabled ? 'Enable site' : 'Disable site',
+          destructive: !site.disabled,
+          loading: togglingEnabled,
+          onAction: handleToggleEnabled
+        }] : []),
         { content: 'Delete', destructive: true, onAction: () => setDeleteOpen(true) }
       ]}
     >
@@ -424,6 +489,10 @@ export function SiteDetailPage() {
             <BlockStack gap="100">
               <Text as="p" variant="bodySm" tone="subdued">Status</Text>
               <Badge tone={STATUS_TONE[site.status] ?? 'info'}>{site.status}</Badge>
+            </BlockStack>
+            <BlockStack gap="100">
+              <Text as="p" variant="bodySm" tone="subdued">Serving</Text>
+              <Badge tone={site.disabled ? 'critical' : 'success'}>{site.disabled ? 'Disabled' : 'Enabled'}</Badge>
             </BlockStack>
             <BlockStack gap="100">
               <Text as="p" variant="bodySm" tone="subdued">Health</Text>
@@ -555,6 +624,27 @@ export function SiteDetailPage() {
           {tab === TAB.SETTINGS && (
             <Card>
               <BlockStack gap="600">
+
+                {/* Site Identity */}
+                <BlockStack gap="400">
+                  <Text as="h3" variant="headingSm">Site Identity</Text>
+                  {identityError && <Banner tone="critical" onDismiss={() => setIdentityError('')}>{identityError}</Banner>}
+                  <TextField label="Display name" value={identityName} onChange={setIdentityName} autoComplete="off" />
+                  {isAdmin ? (
+                    <TextField label="Domain" value={identityDomain} onChange={setIdentityDomain} autoComplete="off"
+                      helpText="Renaming moves the site's files and rewrites its Nginx config on the server. Re-run SSL setup afterwards if this site uses HTTPS." />
+                  ) : (
+                    <TextField label="Domain" value={identityDomain} disabled autoComplete="off"
+                      helpText="Only admins can change the domain." />
+                  )}
+                  <InlineStack align="start">
+                    <Button variant="primary" onClick={handleSaveIdentity} loading={savingIdentity} disabled={!identityDirty}>
+                      Save identity
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
+
+                <Divider />
 
                 {/* Repository */}
                 <BlockStack gap="400">
@@ -951,6 +1041,38 @@ export function SiteDetailPage() {
               Make sure you have a recent backup before continuing.
             </Text>
           </BlockStack>
+        </Modal.Section>
+      </Modal>
+
+      {/* ── Confirm domain rename ────────────────────────────────────────── */}
+      <Modal open={renameConfirmOpen} onClose={() => setRenameConfirmOpen(false)}
+        title={`Rename ${site.domain} to ${identityDomain}?`}
+        primaryAction={{ content: 'Rename', destructive: true, loading: savingIdentity, onAction: doSaveIdentity }}
+        secondaryActions={[{ content: 'Cancel', onAction: () => setRenameConfirmOpen(false) }]}>
+        <Modal.Section>
+          <BlockStack gap="200">
+            <Text as="p">
+              This moves <code>{site.rootPath}</code> on the server and rewrites its Nginx config to serve{' '}
+              <strong>{identityDomain}</strong> instead of <strong>{site.domain}</strong>.
+            </Text>
+            <Text as="p" tone="subdued">
+              Point DNS at the new domain before or right after this completes. If SSL is enabled, re-run SSL setup
+              for the new domain afterwards — the existing certificate won't cover it.
+            </Text>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+
+      {/* ── Confirm disable ───────────────────────────────────────────────── */}
+      <Modal open={disableConfirmOpen} onClose={() => setDisableConfirmOpen(false)}
+        title={`Disable ${site.domain}?`}
+        primaryAction={{ content: 'Disable site', destructive: true, loading: togglingEnabled, onAction: doToggleEnabled }}
+        secondaryActions={[{ content: 'Cancel', onAction: () => setDisableConfirmOpen(false) }]}>
+        <Modal.Section>
+          <Text as="p">
+            Removes this site's Nginx sites-enabled symlink and reloads Nginx — visitors will get a connection error
+            until it's re-enabled. Files, the database, and the deploy history are left untouched.
+          </Text>
         </Modal.Section>
       </Modal>
 

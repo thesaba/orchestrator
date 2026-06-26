@@ -140,6 +140,7 @@ export function SitesPage() {
                   <InlineStack gap="200" align="end">
                     <ResponseSparkline siteId={site.id} />
                     <HealthScoreBadge siteId={site.id} />
+                    {site.disabled && <Badge tone="critical">Disabled</Badge>}
                     {lastDeploy && (
                       <Badge tone={STATUS_TONE[lastDeploy.status] ?? 'info'}>{lastDeploy.status}</Badge>
                     )}
