@@ -293,6 +293,12 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
   // site metadata (tags/pinned/notes — merged in here because Fastify
   // doesn't allow two plugins registering the same method+path under the
   // same prefix; this used to also live in sites.ts as a separate handler).
+  //
+  // NOTE: this route stays open to all authenticated roles (pin toggling on
+  // SitesPage relies on it for everyone) — domain/disabled changes are
+  // gated to admin only inside the handler below since renaming a domain
+  // touches the on-disk Nginx config + site directory, and disabling a site
+  // stops it serving traffic entirely.
   app.patch('/:id', {
     schema: {
       body: {
@@ -301,6 +307,10 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
           repoUrl:       { type: 'string', maxLength: 500 },
           branch:        { type: 'string', minLength: 1, maxLength: 100 },
           name:          { type: 'string', minLength: 1, maxLength: 100 },
+          domain:        { type: 'string', minLength: 3, maxLength: 253,
+                           pattern: '^[a-zA-Z0-9][a-zA-Z0-9\\-\\.]*[a-zA-Z0-9]$' },
+          disabled:      { type: 'boolean' },
+          renameOnDisk:  { type: 'boolean' }, // default true; set false if the site was never provisioned on this server
           gitToken:      { type: 'string', maxLength: 500 },
           preDeploy:     { type: 'string', maxLength: 4096 },
           postDeploy:    { type: 'string', maxLength: 4096 },
@@ -315,12 +325,64 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     }
   }, async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
-    const { repoUrl, branch, name, gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl, tags, pinned, notes } =
-      request.body as {
-        repoUrl?: string; branch?: string; name?: string; gitToken?: string
-        preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
-        tags?: string[]; pinned?: boolean; notes?: string
+    const {
+      repoUrl, branch, name, domain, disabled, renameOnDisk,
+      gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl, tags, pinned, notes
+    } = request.body as {
+      repoUrl?: string; branch?: string; name?: string; domain?: string; disabled?: boolean
+      renameOnDisk?: boolean; gitToken?: string
+      preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
+      tags?: string[]; pinned?: boolean; notes?: string
+    }
+
+    const existing = await app.prisma.site.findUnique({ where: { id: siteId } })
+    if (!existing) return reply.code(404).send({ error: 'Site not found' })
+
+    if ((domain !== undefined && domain !== existing.domain) || disabled !== undefined) {
+      const role = (request.user as { role?: string }).role ?? 'admin'
+      if (role !== 'admin') return reply.code(403).send({ error: 'Only admins can change a site\'s domain or enabled status' })
+    }
+
+    let newRootPath: string | undefined
+    let renameLog = ''
+
+    // ── Domain rename ──────────────────────────────────────────────────────
+    if (domain !== undefined && domain !== existing.domain) {
+      const conflict = await app.prisma.site.findUnique({ where: { domain } })
+      if (conflict) return reply.code(409).send({ error: 'That domain is already in use by another site' })
+
+      if (renameOnDisk !== false) {
+        try {
+          const script = path.join(scriptsDir(), 'rename-domain.sh')
+          const { stdout, stderr } = await exec(
+            `bash "${script}" "${existing.domain}" "${domain}"`,
+            { timeout: 30_000 }
+          )
+          renameLog = (stdout + stderr).trim()
+          newRootPath = `/var/www/sites/${domain}`
+          app.audit('site.renamed', { siteId, meta: { from: existing.domain, to: domain } })
+        } catch (err: unknown) {
+          const e = err as { stdout?: string; stderr?: string; message?: string }
+          const log = (e.stdout ?? e.stderr ?? e.message ?? 'Unknown error').trim()
+          app.audit('site.rename_failed', { siteId, meta: { from: existing.domain, to: domain, error: log } })
+          return reply.code(500).send({ error: 'Failed to rename domain on the server', log })
+        }
       }
+    }
+
+    // ── Enable / disable serving ───────────────────────────────────────────
+    if (disabled !== undefined && disabled !== existing.disabled) {
+      try {
+        const script = path.join(scriptsDir(), 'toggle-site.sh')
+        const toggleDomain = domain ?? existing.domain
+        await exec(`bash "${script}" "${toggleDomain}" "${disabled ? 'off' : 'on'}"`, { timeout: 15_000 })
+        app.audit(disabled ? 'site.disabled' : 'site.enabled', { siteId, meta: { domain: toggleDomain } })
+      } catch (err: unknown) {
+        const e = err as { stdout?: string; stderr?: string; message?: string }
+        const log = (e.stdout ?? e.stderr ?? e.message ?? 'Unknown error').trim()
+        return reply.code(500).send({ error: `Failed to ${disabled ? 'disable' : 'enable'} site on the server`, log })
+      }
+    }
 
     const site = await app.prisma.site.update({
       where: { id: siteId },
@@ -328,6 +390,9 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         ...(repoUrl       !== undefined && { repoUrl }),
         ...(branch        !== undefined && { branch }),
         ...(name          !== undefined && { name }),
+        ...(domain        !== undefined && { domain }),
+        ...(newRootPath   !== undefined && { rootPath: newRootPath }),
+        ...(disabled      !== undefined && { disabled }),
         ...(gitToken      !== undefined && { gitToken: gitToken ? encryptSecret(gitToken) : null }),
         ...(preDeploy     !== undefined && { preDeploy }),
         ...(postDeploy    !== undefined && { postDeploy }),
@@ -346,7 +411,7 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { gitToken: _omit, ...safeSite } = site
-    return { ...safeSite, hasGitToken: !!site.gitToken }
+    return { ...safeSite, hasGitToken: !!site.gitToken, renameLog: renameLog || undefined }
   })
 
   // POST /:id/webhook-token

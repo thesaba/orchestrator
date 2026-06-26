@@ -51,6 +51,7 @@ export interface Site {
   maintenanceMode: boolean
   uptimeMonitor: boolean
   pinned: boolean
+  disabled: boolean
   tags: string   // JSON string
   notes: string | null
   createdAt: string
@@ -96,11 +97,12 @@ export const api = {
         { method: 'DELETE' }
       ),
     update: (id: number, data: {
-      repoUrl?: string; branch?: string; name?: string; gitToken?: string
+      repoUrl?: string; branch?: string; name?: string; domain?: string; disabled?: boolean
+      renameOnDisk?: boolean; gitToken?: string
       preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
       tags?: string[]; pinned?: boolean; notes?: string
     }) =>
-      request<Site>(`/sites/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+      request<Site & { renameLog?: string }>(`/sites/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     clone: (id: number, data: { name: string; domain: string }) =>
       request<Site>(`/sites/${id}/clone`, { method: 'POST', body: JSON.stringify(data) }),
     branches: (id: number) =>
