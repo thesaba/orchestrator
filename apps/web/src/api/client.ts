@@ -759,3 +759,177 @@ export const usersApi = {
     })
 }
 
+// ── Directory (minimal user list, available to every role) ──────────────────
+export interface DirectoryUser {
+  id: number
+  email: string
+  role: string
+}
+
+export const directoryApi = {
+  list: () => request<{ users: DirectoryUser[] }>('/directory')
+}
+
+// ── Tasks (Kanban) ────────────────────────────────────────────────────────────
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done'
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
+
+export interface TaskChecklistItem {
+  id: number
+  taskId: number
+  text: string
+  done: boolean
+  position: number
+}
+
+export interface TaskComment {
+  id: number
+  taskId: number
+  userId: number
+  body: string
+  createdAt: string
+  user: { id: number; email: string }
+}
+
+export interface Task {
+  id: number
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  position: number
+  dueDate: string | null
+  tags: string // JSON string array
+  siteId: number | null
+  site: { id: number; domain: string; name: string } | null
+  assigneeId: number | null
+  assignee: { id: number; email: string } | null
+  createdById: number
+  createdBy: { id: number; email: string }
+  checklist: TaskChecklistItem[]
+  comments?: TaskComment[]
+  _count?: { comments: number }
+  createdAt: string
+  updatedAt: string
+}
+
+export const tasksApi = {
+  list: (params?: { siteId?: number; assigneeId?: number; status?: string; mine?: boolean }) => {
+    const qs = new URLSearchParams()
+    if (params?.siteId) qs.set('siteId', String(params.siteId))
+    if (params?.assigneeId) qs.set('assigneeId', String(params.assigneeId))
+    if (params?.status) qs.set('status', params.status)
+    if (params?.mine) qs.set('mine', '1')
+    const suffix = qs.toString() ? `?${qs}` : ''
+    return request<{ tasks: Task[] }>(`/tasks${suffix}`)
+  },
+  get: (id: number) => request<Task>(`/tasks/${id}`),
+  create: (data: {
+    title: string; description?: string; status?: TaskStatus; priority?: TaskPriority
+    dueDate?: string; tags?: string[]; siteId?: number; assigneeId?: number
+  }) => request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<{
+    title: string; description: string | null; status: TaskStatus; priority: TaskPriority
+    position: number; dueDate: string | null; tags: string[]; siteId: number | null; assigneeId: number | null
+  }>) => request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ ok: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
+
+  addChecklistItem: (taskId: number, text: string) =>
+    request<TaskChecklistItem>(`/tasks/${taskId}/checklist`, { method: 'POST', body: JSON.stringify({ text }) }),
+  updateChecklistItem: (taskId: number, itemId: number, data: Partial<{ text: string; done: boolean; position: number }>) =>
+    request<TaskChecklistItem>(`/tasks/${taskId}/checklist/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  removeChecklistItem: (taskId: number, itemId: number) =>
+    request<{ ok: boolean }>(`/tasks/${taskId}/checklist/${itemId}`, { method: 'DELETE' }),
+
+  addComment: (taskId: number, body: string) =>
+    request<TaskComment>(`/tasks/${taskId}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+  removeComment: (taskId: number, commentId: number) =>
+    request<{ ok: boolean }>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE' })
+}
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+export interface NoteShareEntry {
+  userId: number
+  canEdit: boolean
+  user: { id: number; email: string }
+}
+
+export interface Note {
+  id: number
+  title: string
+  body: string
+  pinned: boolean
+  isPublic: boolean
+  tags: string // JSON string array
+  siteId: number | null
+  site: { id: number; domain: string; name: string } | null
+  ownerId: number
+  owner: { id: number; email: string }
+  shares: NoteShareEntry[]
+  canEdit: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export const notesApi = {
+  list: (params?: { search?: string; tag?: string; pinned?: boolean; siteId?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.search) qs.set('search', params.search)
+    if (params?.tag) qs.set('tag', params.tag)
+    if (params?.pinned) qs.set('pinned', '1')
+    if (params?.siteId) qs.set('siteId', String(params.siteId))
+    const suffix = qs.toString() ? `?${qs}` : ''
+    return request<{ notes: Note[] }>(`/notes${suffix}`)
+  },
+  get: (id: number) => request<Note>(`/notes/${id}`),
+  create: (data: { title: string; body?: string; tags?: string[]; pinned?: boolean; isPublic?: boolean; siteId?: number }) =>
+    request<Note>('/notes', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<{ title: string; body: string; tags: string[]; pinned: boolean; isPublic: boolean; siteId: number | null }>) =>
+    request<Note>(`/notes/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ ok: boolean }>(`/notes/${id}`, { method: 'DELETE' }),
+  setShares: (id: number, shares: { userId: number; canEdit?: boolean }[]) =>
+    request<Note>(`/notes/${id}/shares`, { method: 'PUT', body: JSON.stringify({ shares }) })
+}
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+export type CalendarEventKind = 'event' | 'task_due'
+
+export interface CalendarEvent {
+  id: string // synthetic for occurrences/virtual entries, e.g. "event-12" or "task-7"
+  kind: CalendarEventKind
+  title: string
+  description: string | null
+  type: string
+  startAt: string
+  endAt: string | null
+  allDay: boolean
+  color: string | null
+  recurrence: 'daily' | 'weekly' | 'monthly' | null
+  siteId: number | null
+  site: { id: number; domain: string; name: string } | null
+  taskId: number | null
+  task: { id: number; title: string; status: string } | null
+  createdBy: { id: number; email: string } | null
+  attendees: { userId: number; user: { id: number; email: string } }[]
+  editable: boolean
+}
+
+export const calendarApi = {
+  list: (params: { start: string; end: string; siteId?: number }) => {
+    const qs = new URLSearchParams({ start: params.start, end: params.end })
+    if (params.siteId) qs.set('siteId', String(params.siteId))
+    return request<{ events: CalendarEvent[] }>(`/calendar/events?${qs}`)
+  },
+  create: (data: {
+    title: string; description?: string; type?: string; startAt: string; endAt?: string
+    allDay?: boolean; color?: string; recurrence?: 'daily' | 'weekly' | 'monthly'
+    reminderMins?: number; siteId?: number; taskId?: number; attendeeIds?: number[]
+  }) => request<CalendarEvent>('/calendar/events', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<{
+    title: string; description: string | null; type: string; startAt: string; endAt: string | null
+    allDay: boolean; color: string | null; recurrence: 'daily' | 'weekly' | 'monthly' | null
+    reminderMins: number | null; siteId: number | null; taskId: number | null; attendeeIds: number[]
+  }>) => request<CalendarEvent>(`/calendar/events/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remove: (id: number) => request<{ ok: boolean }>(`/calendar/events/${id}`, { method: 'DELETE' })
+}
+
