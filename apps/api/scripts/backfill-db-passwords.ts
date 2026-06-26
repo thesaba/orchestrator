@@ -7,9 +7,7 @@
 // Safe to re-run — it only touches rows where dbPass is still empty.
 //
 // Usage (from apps/api):
-//   npx ts-node scripts/backfill-db-passwords.ts
-// or after building:
-//   node dist/scripts/backfill-db-passwords.js
+//   npx tsx scripts/backfill-db-passwords.ts
 
 import { PrismaClient } from '@prisma/client'
 import mysql from 'mysql2/promise'

@@ -8,7 +8,7 @@
 // Safe to re-run — CREATE USER IF NOT EXISTS / GRANT are idempotent.
 //
 // Usage (from apps/api):
-//   npx ts-node scripts/backfill-primary-grants.ts
+//   npx tsx scripts/backfill-primary-grants.ts
 
 import { PrismaClient } from '@prisma/client'
 import mysql from 'mysql2/promise'
