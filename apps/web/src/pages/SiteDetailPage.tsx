@@ -110,6 +110,10 @@ export function SiteDetailPage() {
   const [togglingEnabled, setTogglingEnabled] = useState(false)
   const [disableConfirmOpen, setDisableConfirmOpen] = useState(false)
 
+  // Stuck-deploy detection / cancel
+  const [cancellingDeploy, setCancellingDeploy] = useState(false)
+  const [nowTick, setNowTick] = useState(Date.now())
+
   // Delete modal
   const [deleteOpen, setDeleteOpen]     = useState(false)
   const [deleting, setDeleting]         = useState(false)
@@ -274,6 +278,32 @@ export function SiteDetailPage() {
     } catch (err: unknown) {
       setDeployError(err instanceof Error ? err.message : 'Redeploy failed')
     } finally { setRedeploying(null) }
+  }
+
+  // Stuck-deploy detection: ticks every 30s while a deploy is showing so the
+  // "this may be stuck" banner can appear without needing a manual refresh.
+  useEffect(() => {
+    if (!deploying) return
+    const t = setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [deploying])
+
+  const STUCK_AFTER_MIN = 10
+  const DEPLOY_TIMEOUT_MIN = 25 // mirrors the API's default DEPLOY_TIMEOUT_MS watchdog
+  const runningDeployment = site?.deployments.find((d) => d.status === 'running')
+  const stuckDeploy = !!runningDeployment &&
+    (nowTick - new Date(runningDeployment.createdAt).getTime()) > STUCK_AFTER_MIN * 60_000
+
+  const handleCancelDeploy = async () => {
+    setCancellingDeploy(true)
+    try {
+      const r = await redeployApi.cancel(siteId)
+      showToast(r.message)
+      setDeploying(false)
+      await fetchSite()
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Cancel failed', { error: true })
+    } finally { setCancellingDeploy(false) }
   }
 
   const handleSaveRepo = async () => {
@@ -525,8 +555,22 @@ export function SiteDetailPage() {
             <BlockStack gap="400">
               <InlineStack align="space-between">
                 <Text as="h2" variant="headingMd">Deploying {site.domain}</Text>
-                <Badge tone="info">Running</Badge>
+                <InlineStack gap="200" blockAlign="center">
+                  <Badge tone="info">Running</Badge>
+                  {isAdmin && (
+                    <Button size="micro" tone="critical" loading={cancellingDeploy} onClick={handleCancelDeploy}>
+                      Cancel
+                    </Button>
+                  )}
+                </InlineStack>
               </InlineStack>
+              {stuckDeploy && (
+                <Banner tone="warning">
+                  This deploy has been running for over {STUCK_AFTER_MIN} minutes — it may be stuck (e.g. a network
+                  stall during git clone or package install). It will auto-fail after{' '}
+                  {Math.round(DEPLOY_TIMEOUT_MIN)} minutes total, or {isAdmin ? 'you can cancel it now above.' : 'ask an admin to cancel it.'}
+                </Banner>
+              )}
               <ProvisionLog endpoint={`/api/sites/${siteId}/deploy/stream`} onComplete={handleDeployComplete} />
             </BlockStack>
           </Card>

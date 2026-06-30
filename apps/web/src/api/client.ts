@@ -547,8 +547,17 @@ export const heatmapApi = {
 
 export const redeployApi = {
   trigger: (siteId: number, deployId: number) =>
-    request<{ ok: boolean; deploymentId: number }>(
+    request<{ ok: boolean; deploymentId?: number; queued?: boolean; message?: string }>(
       `/sites/${siteId}/deployments/${deployId}/redeploy`,
+      { method: 'POST' }
+    ),
+  // Admin-only escape hatch for a deploy stuck on 'running' (e.g. a hung
+  // git clone / composer install after a network stall). Kills the process
+  // if still tracked, or force-marks the row failed if it's orphaned from a
+  // previous API process lifetime.
+  cancel: (siteId: number) =>
+    request<{ ok: boolean; message: string }>(
+      `/sites/${siteId}/deploy/cancel`,
       { method: 'POST' }
     )
 }
