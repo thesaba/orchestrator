@@ -79,7 +79,13 @@ if [ -f package.json ] && grep -q '"build"[[:space:]]*:' package.json; then
     yarn install --frozen-lockfile
     yarn build
   else
-    npm ci
+    # Try a strict install first; if peer-dependency conflicts prevent it
+    # (e.g. mismatched tiptap/other monorepo packages), fall back to
+    # --legacy-peer-deps so the deploy isn't blocked by upstream version skew.
+    if ! npm ci 2>&1; then
+      log "[4/8] npm ci failed (peer dep conflict?) — retrying with --legacy-peer-deps"
+      npm ci --legacy-peer-deps
+    fi
     npm run build
   fi
   rm -rf node_modules
