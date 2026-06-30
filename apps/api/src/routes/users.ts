@@ -37,7 +37,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
     const hash = await bcrypt.hash(password, 12)
     const user = await app.prisma.user.create({
       data: { email, password: hash, role },
-      select: { id: true, email: true, role: true, createdAt: true }
+      select: { id: true, email: true, role: true, allSitesAccess: true, createdAt: true }
     })
 
     app.audit('user.created', { req: request, meta: { email, role } })

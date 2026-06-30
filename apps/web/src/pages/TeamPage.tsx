@@ -82,12 +82,15 @@ export function TeamPage() {
       setInviteEmail('')
       setInvitePassword('')
       setInviteRole('developer')
-      // Immediately prompt for site access on non-admin users — admins get
-      // full access automatically and have nothing to configure here.
+      // Wait for the invite modal close animation to finish before opening
+      // the site access modal — opening both simultaneously confuses Polaris.
       if (user.role !== 'admin') {
-        setAccessUser(user)
-        setAssignedSites([])
-        setAccessAllSites(false)
+        const newUser = user
+        setTimeout(() => {
+          setAssignedSites([])
+          setAccessAllSites(false)
+          setAccessUser(newUser)
+        }, 350)
       }
     } catch (e: unknown) {
       setInviteError((e as Error).message)
