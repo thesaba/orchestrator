@@ -82,6 +82,21 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
       const status = code === 0 ? 'active' : 'error'
       await app.prisma.site.update({ where: { id: siteId }, data: { status } })
 
+      if (code === 0) {
+        // Register the primary database so the Databases page shows it
+        // immediately instead of the "will appear here once migrated" message.
+        // dbPass is intentionally empty — primary credentials live in shared/.env.
+        try {
+          await app.prisma.siteDatabase.upsert({
+            where:  { dbName },
+            create: { siteId, dbName, dbUser, dbPass: '', isPrimary: true },
+            update: {}  // already registered — leave it alone
+          })
+        } catch (err) {
+          console.error('[provision] Failed to create SiteDatabase record:', err)
+        }
+      }
+
       emitter.emit('done', status)
       emitters.delete(siteId)
 

@@ -48,8 +48,19 @@ else
   log "[2/3] No DB info — skipping MySQL cleanup"
 fi
 
-# ── 3. Site files ────────────────────────────────────────────────────────────
-log "[3/3] Removing site files..."
+# ── 3. Supervisor worker config ───────────────────────────────────────────────
+SUPERVISOR_CONF="/etc/supervisor/conf.d/${DOMAIN}-worker.conf"
+log "[3/4] Removing supervisor worker config (if any)..."
+if [ -f "$SUPERVISOR_CONF" ]; then
+  rm -f "$SUPERVISOR_CONF"
+  supervisorctl reread && supervisorctl update 2>&1 || true
+  log "  Removed $SUPERVISOR_CONF and reloaded supervisor"
+else
+  log "  No supervisor config found for $DOMAIN — skipping"
+fi
+
+# ── 4. Site files ────────────────────────────────────────────────────────────
+log "[4/4] Removing site files..."
 if [ -d "$ROOT_PATH" ]; then
   rm -rf "$ROOT_PATH"
   log "  Removed $ROOT_PATH"

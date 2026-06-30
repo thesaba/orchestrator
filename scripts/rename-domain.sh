@@ -63,5 +63,18 @@ else
   log "  WARNING: no Nginx config found at $OLD_CONF — skipped Nginx rewrite"
 fi
 
+# ── 3. Supervisor config ─────────────────────────────────────────────────────
+# Stale conf.d files for the old domain cause CANT_REREAD for ALL sites on
+# every subsequent `supervisorctl update` call — remove it unconditionally.
+OLD_SUP="/etc/supervisor/conf.d/${OLD}-worker.conf"
+if [ -f "$OLD_SUP" ]; then
+  log "[3/3] Removing stale supervisor config for old domain..."
+  rm -f "$OLD_SUP"
+  supervisorctl reread && supervisorctl update 2>&1 || true
+  log "  Removed $OLD_SUP and reloaded supervisor"
+else
+  log "[3/3] No supervisor config found for $OLD — skipping"
+fi
+
 log "=== Done. $OLD renamed to $NEW ==="
 log "NOTE: re-run SSL setup for $NEW if this site was using HTTPS."
