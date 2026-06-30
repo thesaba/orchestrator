@@ -365,7 +365,7 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
         env: { ...process.env, MYSQL_PWD: rootCreds.pass },
         shell: '/bin/bash',
         maxBuffer: 10 * 1024 * 1024,
-        timeout: 300_000  // 5 min for large imports
+        timeout: 1_800_000  // 30 min — 800 MB+ dumps can take a long time
       })
 
       app.audit('db.import', {

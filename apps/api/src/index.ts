@@ -54,7 +54,7 @@ async function start() {
   await app.register(cors, { origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000' })
   await app.register(rateLimit, { global: false })
   await app.register(websocket)
-  await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } }) // 500MB max
+  await app.register(multipart, { limits: { fileSize: 512 * 1024 * 1024 } }) // 512 MB — matches nginx client_max_body_size
   await app.register(prismaPlugin)
   await app.register(jwtPlugin)
   await app.register(auditPlugin)
