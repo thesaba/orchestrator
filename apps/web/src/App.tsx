@@ -15,6 +15,7 @@ import { TeamPage } from './pages/TeamPage'
 import { TasksPage } from './pages/TasksPage'
 import { NotesPage } from './pages/NotesPage'
 import { CalendarPage } from './pages/CalendarPage'
+import { ServerPage } from './pages/ServerPage'
 
 function PolarisLink({ children, url, ...rest }: ComponentProps<'a'> & { url: string }) {
   return <Link to={url} {...(rest as any)}>{children}</Link>
@@ -49,6 +50,7 @@ function AppRoutes() {
                 <Route path="/monitoring" element={<MonitoringPage />} />
                 <Route path="/settings"   element={<SettingsPage />} />
                 <Route path="/team"       element={<AdminRoute><TeamPage /></AdminRoute>} />
+                <Route path="/server"     element={<AdminRoute><ServerPage /></AdminRoute>} />
                 <Route path="/tasks"      element={<TasksPage />} />
                 <Route path="/notes"      element={<NotesPage />} />
                 <Route path="/calendar"   element={<CalendarPage />} />

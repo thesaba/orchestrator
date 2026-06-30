@@ -9,10 +9,11 @@ import {
   Button,
   Banner,
   Divider,
-  Badge
+  Badge,
+  Select
 } from '@shopify/polaris'
 import { useEffect, useState } from 'react'
-import { api, PanelSettings, s3Api } from '../api/client'
+import { api, PanelSettings, s3Api, DODroplet } from '../api/client'
 import { useToast } from '../context/toast'
 import { useAuth } from '../context/AuthContext'
 
@@ -58,6 +59,13 @@ export function SettingsPage() {
   const [mysqlRootPass, setMysqlRootPass] = useState('')
   const [savingMysql,   setSavingMysql]   = useState(false)
 
+  // DigitalOcean API state
+  const [doToken,      setDoToken]      = useState('')
+  const [doDropletId,  setDoDropletId]  = useState('')
+  const [doDroplets,   setDoDroplets]   = useState<DODroplet[]>([])
+  const [doLoadingList, setDoLoadingList] = useState(false)
+  const [savingDo,     setSavingDo]     = useState(false)
+
   const saveS3 = async () => {
     setSavingS3(true)
     try {
@@ -82,6 +90,7 @@ export function SettingsPage() {
       if ((s as any).s3_bucket)        setS3Bucket((s as any).s3_bucket)
       if ((s as any).s3_endpoint)      setS3Endpoint((s as any).s3_endpoint)
       if ((s as any).mysql_root_user)  setMysqlRootUser((s as any).mysql_root_user)
+      if ((s as any).do_droplet_id)   setDoDropletId((s as any).do_droplet_id)
     }).catch(() => {}).finally(() => setLoading(false))
     api.auth.me().then((u) => setTotpEnabled(u?.totpEnabled ?? false)).catch(() => {})
   }, [])
@@ -399,6 +408,93 @@ export function SettingsPage() {
                     }}
                   >
                     Save credentials
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        )}
+
+        {/* ── DigitalOcean API (admin only) ─────────────────────────────── */}
+        {isAdmin && (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">DigitalOcean API</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Lets the Server page control this droplet directly — reboot, resize, snapshots, backups,
+                    firewalls — without logging into the DigitalOcean dashboard. Generate a Personal Access
+                    Token with Read and Write scope from your DigitalOcean account (API → Tokens).
+                  </Text>
+                </BlockStack>
+                <TextField
+                  label="API token"
+                  type="password"
+                  value={doToken}
+                  onChange={setDoToken}
+                  autoComplete="off"
+                  placeholder="Leave blank to keep existing secret"
+                />
+                <InlineStack align="end">
+                  <Button
+                    loading={doLoadingList}
+                    disabled={!doToken}
+                    onClick={async () => {
+                      setDoLoadingList(true)
+                      try {
+                        await api.settings.update({ do_api_token: doToken })
+                        const droplets = await api.server.listDroplets()
+                        setDoDroplets(droplets)
+                        showToast('Token saved — pick your droplet below')
+                      } catch (err: unknown) {
+                        showToast(err instanceof Error ? err.message : 'Failed to verify token', { error: true })
+                      } finally {
+                        setDoLoadingList(false)
+                      }
+                    }}
+                  >
+                    Save &amp; load droplets
+                  </Button>
+                </InlineStack>
+                <Divider />
+                {doDroplets.length > 0 ? (
+                  <Select
+                    label="Droplet"
+                    options={doDroplets.map((d) => ({
+                      label: `${d.name} — ${d.region?.slug} · ${d.size_slug} · ${d.networks?.v4?.[0]?.ip_address ?? 'no IP'}`,
+                      value: String(d.id)
+                    }))}
+                    value={doDropletId}
+                    onChange={setDoDropletId}
+                  />
+                ) : (
+                  <TextField
+                    label="Droplet ID"
+                    value={doDropletId}
+                    onChange={setDoDropletId}
+                    autoComplete="off"
+                    helpText="Numeric droplet ID. Save the token above and click 'Save & load droplets' to pick from a list instead."
+                  />
+                )}
+                <InlineStack align="end">
+                  <Button
+                    variant="primary"
+                    loading={savingDo}
+                    disabled={!doDropletId}
+                    onClick={async () => {
+                      setSavingDo(true)
+                      try {
+                        await api.settings.update({ do_droplet_id: doDropletId })
+                        showToast('DigitalOcean settings saved')
+                      } catch (err: unknown) {
+                        showToast(err instanceof Error ? err.message : 'Save failed', { error: true })
+                      } finally {
+                        setSavingDo(false)
+                      }
+                    }}
+                  >
+                    Save droplet selection
                   </Button>
                 </InlineStack>
               </BlockStack>

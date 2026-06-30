@@ -139,6 +139,28 @@ export const api = {
         body: JSON.stringify({ action })
       })
   },
+  server: {
+    status: () => request<ServerStatus>('/server/status'),
+    listDroplets: () => request<DODroplet[]>('/server/droplets'),
+    sizes: () => request<DOSize[]>('/server/sizes'),
+    action: (type: string) => request<DOAction>('/server/actions', { method: 'POST', body: JSON.stringify({ type }) }),
+    actions: () => request<DOAction[]>('/server/actions'),
+    actionStatus: (id: number) => request<DOAction>(`/server/actions/${id}`),
+    resize: (size: string, disk: boolean) =>
+      request<DOAction>('/server/resize', { method: 'POST', body: JSON.stringify({ size, disk }) }),
+    rename: (name: string) =>
+      request<DOAction>('/server/rename', { method: 'PATCH', body: JSON.stringify({ name }) }),
+    snapshots: () => request<DOSnapshot[]>('/server/snapshots'),
+    createSnapshot: (name: string) =>
+      request<DOAction>('/server/snapshots', { method: 'POST', body: JSON.stringify({ name }) }),
+    deleteSnapshot: (id: string) => request<{ ok: boolean }>(`/server/snapshots/${id}`, { method: 'DELETE' }),
+    backups: () => request<DOBackup[]>('/server/backups'),
+    firewalls: () => request<DOFirewall[]>('/server/firewalls'),
+    addFirewallRule: (id: string, body: { inbound_rules?: unknown[]; outbound_rules?: unknown[] }) =>
+      request<{ ok: boolean }>(`/server/firewalls/${id}/rules`, { method: 'POST', body: JSON.stringify(body) }),
+    removeFirewallRule: (id: string, body: { inbound_rules?: unknown[]; outbound_rules?: unknown[] }) =>
+      request<{ ok: boolean }>(`/server/firewalls/${id}/rules`, { method: 'DELETE', body: JSON.stringify(body) })
+  },
   audit: {
     list: (params?: { siteId?: number; limit?: number; offset?: number }) => {
       const q = new URLSearchParams()
@@ -329,6 +351,8 @@ export interface PanelSettings {
   panel_url: string
   notify_email: string
   deploy_slack_webhook: string
+  do_api_token?: string
+  do_droplet_id?: string
 }
 
 export interface Release {
@@ -372,6 +396,89 @@ export interface ServiceControlResult {
   action: string
   status: 'active' | 'inactive'
   output: string
+}
+
+// ── DigitalOcean droplet control (Server page) ──────────────────────────────
+export interface DODroplet {
+  id: number
+  name: string
+  status: 'active' | 'off' | 'archive' | 'new'
+  memory: number
+  vcpus: number
+  disk: number
+  region: { slug: string; name: string }
+  image: { slug: string | null; distribution: string; name: string }
+  size: { slug: string; memory: number; vcpus: number; disk: number; price_monthly: number }
+  size_slug: string
+  networks: { v4: { ip_address: string; type: string }[]; v6: { ip_address: string; type: string }[] }
+  created_at: string
+  tags: string[]
+  backup_ids: number[]
+  snapshot_ids: number[]
+  features: string[]
+  next_backup_window: { start: string; end: string } | null
+}
+
+export interface DOSize {
+  slug: string
+  memory: number
+  vcpus: number
+  disk: number
+  transfer: number
+  price_monthly: number
+  price_hourly: number
+  regions: string[]
+  available: boolean
+  description: string
+}
+
+export interface DOAction {
+  id: number
+  status: 'in-progress' | 'completed' | 'errored'
+  type: string
+  started_at: string
+  completed_at: string | null
+  resource_id: number
+  resource_type: string
+  region: { slug: string } | null
+}
+
+export interface DOSnapshot {
+  id: string
+  name: string
+  created_at: string
+  min_disk_size: number
+  size_gigabytes: number
+}
+
+export interface DOBackup {
+  id: number
+  name: string
+  created_at: string
+  min_disk_size: number
+  size_gigabytes: number
+}
+
+export interface DOFirewallRule {
+  protocol: string
+  ports: string
+  sources?: { addresses?: string[] }
+  destinations?: { addresses?: string[] }
+}
+
+export interface DOFirewall {
+  id: string
+  name: string
+  status: string
+  inbound_rules: DOFirewallRule[]
+  outbound_rules: DOFirewallRule[]
+  droplet_ids: number[]
+}
+
+export interface ServerStatus {
+  configured: boolean
+  needsDropletSelection: boolean
+  droplet: DODroplet | null
 }
 
 export interface UptimeSiteStatus {

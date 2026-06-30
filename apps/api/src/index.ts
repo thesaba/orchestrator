@@ -38,6 +38,7 @@ import { tasksRoutes } from './routes/tasks'
 import { notesRoutes } from './routes/notes'
 import { calendarRoutes } from './routes/calendar'
 import { directoryRoutes } from './routes/directory'
+import { serverRoutes } from './routes/server'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 
 const app = Fastify({
@@ -95,6 +96,7 @@ async function start() {
   await app.register(notesRoutes,       { prefix: '/api/notes' })
   await app.register(calendarRoutes,    { prefix: '/api/calendar' })
   await app.register(directoryRoutes,   { prefix: '/api/directory' })
+  await app.register(serverRoutes,      { prefix: '/api/server' })
 
   // Loopback-only, shared-secret-protected — used by the phpMyAdmin signon
   // bridge to redeem a one-time token for real DB credentials. See
