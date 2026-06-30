@@ -36,17 +36,26 @@ const LOG_FLUSH_INTERVAL_MS = 5_000
 // from a previous process lifetime can still be tracking it. Mark these
 // failed (rather than leaving them stuck forever) and, if the owning site had
 // a deploy queued behind it, kick that off now instead of leaving it blocked.
+//
+// 'pending' rows are included too: an older, now-removed version of the
+// redeploy endpoint used to insert a 'pending' Deployment row and never
+// actually start a deploy. Nothing in the codebase has ever processed
+// 'pending' deployments, so any row in that state is dead — pre-existing
+// data left over from before this fix, not something the current code
+// produces. Sweep them up the same way so they don't sit stuck forever.
 export async function reconcileOrphanedDeployments(app: FastifyInstance) {
-  const orphaned = await app.prisma.deployment.findMany({ where: { status: 'running' } })
+  const orphaned = await app.prisma.deployment.findMany({ where: { status: { in: ['running', 'pending'] } } })
   if (orphaned.length === 0) return
 
   for (const d of orphaned) {
-    const note = '\n[orchestrator] Deploy was interrupted — the API process restarted while this deploy was still running. Marked as failed; please redeploy.\n'
+    const note = d.status === 'pending'
+      ? '\n[orchestrator] This deployment was created by a since-fixed bug in the Redeploy button and was never actually started. Marked as failed; please redeploy.\n'
+      : '\n[orchestrator] Deploy was interrupted — the API process restarted while this deploy was still running. Marked as failed; please redeploy.\n'
     await app.prisma.deployment.update({
       where: { id: d.id },
       data: { status: 'failed', log: (d.log ?? '') + note }
     })
-    app.audit('deploy.orphaned', { siteId: d.siteId, meta: { deploymentId: d.id } })
+    app.audit('deploy.orphaned', { siteId: d.siteId, meta: { deploymentId: d.id, wasStatus: d.status } })
 
     const site = await app.prisma.site.findUnique({ where: { id: d.siteId } })
     if (site?.deployQueued && site.repoUrl) {
