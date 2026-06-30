@@ -13,6 +13,59 @@ const exec = promisify(execCb)
 
 const deployEmitters  = new Map<number, EventEmitter>()
 const deployLogBuffers = new Map<number, string[]>()
+// Child process handle for the currently-running deploy on a site, so a
+// stuck/hung deploy (e.g. a network stall mid `git clone`/`composer install`,
+// which never emits `close`) can be killed manually or by the watchdog below.
+const deployProcs = new Map<number, ReturnType<typeof spawn>>()
+
+// Max time a single deploy is allowed to run before it's killed and marked
+// failed. Without this, a hung child process (no network timeout in deploy.sh)
+// leaves the Deployment row stuck on 'running' forever and blocks every
+// future deploy for that site (deployEmitters never clears). Override via
+// DEPLOY_TIMEOUT_MS env if some sites legitimately need longer builds.
+const DEPLOY_TIMEOUT_MS = Number(process.env.DEPLOY_TIMEOUT_MS ?? 25 * 60_000)
+
+// How often to flush the in-memory log buffer to the DB while a deploy is
+// running. Without this, `Deployment.log` is only ever written once, in the
+// close handler — so a stuck deploy (or an API restart mid-deploy) leaves the
+// log column empty/null forever, even though lines were actually produced.
+const LOG_FLUSH_INTERVAL_MS = 5_000
+
+// On API startup, any Deployment row still 'running' is guaranteed orphaned —
+// deployEmitters/deployProcs/deployLogBuffers are in-memory only, so nothing
+// from a previous process lifetime can still be tracking it. Mark these
+// failed (rather than leaving them stuck forever) and, if the owning site had
+// a deploy queued behind it, kick that off now instead of leaving it blocked.
+export async function reconcileOrphanedDeployments(app: FastifyInstance) {
+  const orphaned = await app.prisma.deployment.findMany({ where: { status: 'running' } })
+  if (orphaned.length === 0) return
+
+  for (const d of orphaned) {
+    const note = '\n[orchestrator] Deploy was interrupted — the API process restarted while this deploy was still running. Marked as failed; please redeploy.\n'
+    await app.prisma.deployment.update({
+      where: { id: d.id },
+      data: { status: 'failed', log: (d.log ?? '') + note }
+    })
+    app.audit('deploy.orphaned', { siteId: d.siteId, meta: { deploymentId: d.id } })
+
+    const site = await app.prisma.site.findUnique({ where: { id: d.siteId } })
+    if (site?.deployQueued && site.repoUrl) {
+      await app.prisma.site.update({ where: { id: site.id }, data: { deployQueued: false } })
+      runDeploy(app, site.id, {
+        rootPath: site.rootPath,
+        repoUrl: site.repoUrl,
+        branch: site.branch,
+        phpVersion: site.phpVersion,
+        domain: site.domain,
+        gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
+        healthCheck: site.healthCheck,
+        healthCheckUrl: site.healthCheckUrl
+      }).catch(() => {/* best effort */})
+    }
+  }
+
+  app.log.warn(`Reconciled ${orphaned.length} orphaned 'running' deployment(s) left over from a previous process lifetime.`)
+}
 
 function scriptsDir(): string {
   const dir = process.env.SCRIPTS_DIR
@@ -97,8 +150,9 @@ export async function runDeploy(
   const proc = spawn(
     'bash',
     [path.join(scriptsDir(), 'deploy.sh'), opts.rootPath, opts.branch, opts.phpVersion],
-    { env: { ...process.env, REPO_URL: authenticatedRepoUrl } }
+    { env: { ...process.env, REPO_URL: authenticatedRepoUrl }, detached: true } // detached so we can kill the whole process group (git/composer/npm children), not just bash
   )
+  deployProcs.set(siteId, proc)
 
   let commitHash = ''
   const addLine = (raw: string) => {
@@ -109,11 +163,32 @@ export async function runDeploy(
     if (m) commitHash = m[1]
   }
 
-  proc.stdout.on('data', (c: Buffer) => addLine(c.toString()))
-  proc.stderr.on('data', (c: Buffer) => addLine(c.toString()))
+  proc.stdout?.on('data', (c: Buffer) => addLine(c.toString()))
+  proc.stderr?.on('data', (c: Buffer) => addLine(c.toString()))
+
+  // Periodically flush the log buffer to the DB so it survives a stuck
+  // deploy or an API restart instead of only being written on close.
+  const flushInterval = setInterval(() => {
+    const buf = deployLogBuffers.get(deployment.id)
+    if (!buf) return
+    app.prisma.deployment.update({ where: { id: deployment.id }, data: { log: buf.join('') } }).catch(() => {})
+  }, LOG_FLUSH_INTERVAL_MS)
+
+  let timedOut = false
+  let finished = false
+  const watchdog = setTimeout(() => {
+    if (finished) return
+    timedOut = true
+    addLine(`\n[orchestrator] ✗ Deploy exceeded ${Math.round(DEPLOY_TIMEOUT_MS / 60_000)}m timeout — likely a network stall (git clone / composer / npm install hung). Killing process...\n`)
+    try { process.kill(-proc.pid!, 'SIGKILL') } catch { try { proc.kill('SIGKILL') } catch {/* already gone */} }
+  }, DEPLOY_TIMEOUT_MS)
 
   proc.on('close', async (code) => {
-    let status: 'success' | 'failed' = code === 0 ? 'success' : 'failed'
+    finished = true
+    clearTimeout(watchdog)
+    clearInterval(flushInterval)
+    deployProcs.delete(siteId)
+    let status: 'success' | 'failed' = code === 0 && !timedOut ? 'success' : 'failed'
 
     // ── Health check after successful deploy ─────────────────────────────────
     if (status === 'success' && opts.healthCheck) {
@@ -241,6 +316,39 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
       const e = err as { code?: number; message: string }
       return reply.code(e.code ?? 500).send({ error: e.message })
     }
+  })
+
+  // POST /:id/deploy/cancel — admin-only escape hatch for a stuck deploy.
+  // Kills the running process (if this API process is the one that started
+  // it) and/or force-marks a 'running' Deployment row as failed (covers the
+  // case where the row is orphaned from a previous process lifetime and has
+  // no live process to kill). Also clears deployQueued so a queued deploy
+  // isn't left waiting behind a row that will never finish.
+  app.post('/:id/deploy/cancel', { preHandler: [app.requireRole(['admin'])] }, async (request, reply) => {
+    const siteId = Number((request.params as { id: string }).id)
+
+    const proc = deployProcs.get(siteId)
+    if (proc) {
+      try { process.kill(-proc.pid!, 'SIGKILL') } catch { try { proc.kill('SIGKILL') } catch {/* already gone */} }
+      // proc.on('close') will fire shortly and do the normal finalize/cleanup —
+      // nothing more to do here.
+      return { ok: true, message: 'Kill signal sent — the deploy will be marked failed shortly.' }
+    }
+
+    // No live process tracked (orphaned row, e.g. from before an API restart) —
+    // force-finalize directly.
+    const running = await app.prisma.deployment.findFirst({ where: { siteId, status: 'running' }, orderBy: { createdAt: 'desc' } })
+    if (!running) return reply.code(404).send({ error: 'No running deploy found for this site' })
+
+    await app.prisma.deployment.update({
+      where: { id: running.id },
+      data: { status: 'failed', log: (running.log ?? '') + '\n[orchestrator] Deploy cancelled by admin.\n' }
+    })
+    await app.prisma.site.update({ where: { id: siteId }, data: { deployQueued: false } })
+    deployEmitters.get(siteId)?.emit('done', 'failed')
+    deployEmitters.delete(siteId)
+    app.audit('deploy.cancelled', { siteId, meta: { deploymentId: running.id } })
+    return { ok: true, message: 'Marked the stuck deploy as failed.' }
   })
 
   // GET /:id/deploy/stream — SSE of current deploy
@@ -471,19 +579,49 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     return { days: byDate }
   })
 
-  // POST /:id/deployments/:deployId/redeploy — one-click redeploy with same branch/commit
+  // POST /:id/deployments/:deployId/redeploy — one-click redeploy with the
+  // site's current repo/branch config.
+  //
+  // NOTE: this used to just insert a Deployment row with status 'pending'
+  // and never actually start a deploy ("the normal deploy mechanism handles
+  // it" — it didn't). That left every redeploy permanently stuck on
+  // 'pending'. Fixed to actually call runDeploy(), same as POST /:id/deploy.
   app.post('/:id/deployments/:deployId/redeploy', async (request, reply) => {
-    const siteId   = Number((request.params as { id: string; deployId: string }).id)
-    const deployId = Number((request.params as { id: string; deployId: string }).deployId)
+    const siteId = Number((request.params as { id: string; deployId: string }).id)
+    // deployId is accepted for the URL shape / future use (e.g. redeploying a
+    // specific past commit) but a redeploy today just re-runs the site's
+    // current branch — deploy.sh always clones HEAD of that branch.
+    void (request.params as { deployId: string }).deployId
+
     const site = await app.prisma.site.findUnique({ where: { id: siteId } })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
-    // Just trigger a fresh deploy (same config)
-    const newDeploy = await app.prisma.deployment.create({
-      data: { siteId, branch: site.branch, status: 'pending', comment: 'Redeploy' }
-    })
-    // Trigger deploy using same mechanism - emit on the deploy event
-    // For now just mark as pending and return; the normal deploy mechanism handles it
-    return reply.code(202).send({ ok: true, deploymentId: newDeploy.id })
+    if (!site.repoUrl) return reply.code(400).send({ error: 'No repository URL configured' })
+    if (site.status !== 'active') return reply.code(400).send({ error: 'Site is not active' })
+
+    await writeHook(site.rootPath, 'pre-deploy.sh',  site.preDeploy)
+    await writeHook(site.rootPath, 'post-deploy.sh', site.postDeploy)
+
+    if (deployEmitters.has(siteId)) {
+      await app.prisma.site.update({ where: { id: siteId }, data: { deployQueued: true } })
+      return reply.code(202).send({ ok: true, queued: true, message: 'Deploy queued — will start automatically after the current one finishes.' })
+    }
+
+    try {
+      const deploymentId = await runDeploy(app, siteId, {
+        rootPath: site.rootPath,
+        repoUrl: site.repoUrl,
+        branch: site.branch,
+        phpVersion: site.phpVersion,
+        domain: site.domain,
+        gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
+        healthCheck: site.healthCheck,
+        healthCheckUrl: site.healthCheckUrl
+      })
+      return reply.code(202).send({ ok: true, deploymentId })
+    } catch (err: unknown) {
+      const e = err as { code?: number; message: string }
+      return reply.code(e.code ?? 500).send({ error: e.message })
+    }
   })
 
   // POST /:id/rollback

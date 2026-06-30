@@ -13,7 +13,7 @@ import { dbManageRoutes } from './routes/db-manage'
 import { authRoutes } from './routes/auth'
 import { sitesRoutes } from './routes/sites'
 import { provisionRoutes } from './routes/provision'
-import { deployRoutes } from './routes/deploy'
+import { deployRoutes, reconcileOrphanedDeployments } from './routes/deploy'
 import { webhookRoutes } from './routes/webhooks'
 import { monitorRoutes } from './routes/monitor'
 import { configRoutes } from './routes/config'
@@ -105,6 +105,12 @@ async function start() {
 
   const port = Number(process.env.PORT ?? 3001)
   await app.listen({ port, host: '127.0.0.1' })
+
+  // Any Deployment left 'running' is orphaned from a previous process
+  // lifetime (in-memory deploy state doesn't survive a restart) — mark them
+  // failed instead of leaving them stuck forever, and unblock anything
+  // queued behind them.
+  await reconcileOrphanedDeployments(app)
 
   // Start uptime monitor after server is listening
   startUptimeMonitor(app.prisma)
