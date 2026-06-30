@@ -13,6 +13,7 @@ function scriptsDir(): string {
 
 export const sitesRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   function redactGitToken<T extends { gitToken?: string | null }>(site: T) {
     const { gitToken, ...rest } = site
@@ -23,7 +24,16 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     const payload = request.user as { userId: number; role?: string }
     const role = payload.role ?? 'admin'
 
-    const where = role === 'admin'
+    let hasAllSitesAccess = role === 'admin'
+    if (!hasAllSitesAccess) {
+      const dbUser = await app.prisma.user.findUnique({
+        where: { id: payload.userId },
+        select: { allSitesAccess: true }
+      })
+      hasAllSitesAccess = !!dbUser?.allSitesAccess
+    }
+
+    const where = hasAllSitesAccess
       ? {}
       : { siteUsers: { some: { userId: payload.userId } } }
 

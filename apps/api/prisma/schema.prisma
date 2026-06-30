@@ -12,6 +12,7 @@ model User {
   email       String     @unique
   password    String
   role        String     @default("admin") // "admin" | "developer" | "viewer"
+  allSitesAccess Boolean @default(false) // non-admin: bypasses per-site SiteUser checks, grants access to all sites incl. future ones
   totpSecret  String?
   totpEnabled Boolean    @default(false)
   createdAt   DateTime   @default(now())

@@ -29,6 +29,7 @@ const SAFE_FILENAME = /^[\w\-]+\.sql\.gz$/
 
 export const databaseRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // ── List backups ──────────────────────────────────────────────────────────
 

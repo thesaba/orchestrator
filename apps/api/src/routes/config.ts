@@ -8,6 +8,7 @@ const exec = promisify(execCb)
 
 export const configRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // ── Nginx config ─────────────────────────────────────────────────────────
 

@@ -32,6 +32,7 @@ async function ensureSharedLogsDir(rootPath: string): Promise<void> {
 
 export const supervisorRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // ── Supervisor config ─────────────────────────────────────────────────────
 

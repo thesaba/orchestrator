@@ -7,6 +7,7 @@ const exec = promisify(execCb)
 
 export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // POST /:id/maintenance { action: 'down'|'up', secret?: string }
   app.post('/:id/maintenance', {

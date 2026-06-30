@@ -17,7 +17,7 @@ export const terminalRoutes: FastifyPluginAsync = async (app) => {
       return
     }
 
-    let payload: { userId?: number }
+    let payload: { userId?: number; role?: string }
     try {
       payload = app.jwt.verify(token)
     } catch {
@@ -32,6 +32,34 @@ export const terminalRoutes: FastifyPluginAsync = async (app) => {
       ws.send(JSON.stringify({ error: 'Site not found' }))
       ws.close()
       return
+    }
+
+    // Manual JWT verify above doesn't run through the normal preHandler
+    // chain, so requireSiteAccess() never sees this request — enforce the
+    // same per-site authorization here. A full host shell is the highest-
+    // privilege surface in the panel; it must never be reachable for a
+    // site the caller wasn't explicitly (or blanket-) granted.
+    const role = payload.role ?? 'admin'
+    if (role !== 'admin' && payload.userId) {
+      const dbUser = await app.prisma.user.findUnique({
+        where: { id: payload.userId },
+        select: { allSitesAccess: true }
+      })
+      if (!dbUser?.allSitesAccess) {
+        const access = await app.prisma.siteUser.findUnique({
+          where: { userId_siteId: { userId: payload.userId, siteId } }
+        })
+        if (!access) {
+          ws.send(JSON.stringify({ error: 'Forbidden: no access to this site' }))
+          ws.close()
+          return
+        }
+      }
+      if (role === 'viewer') {
+        ws.send(JSON.stringify({ error: 'Forbidden: viewer role cannot use the terminal' }))
+        ws.close()
+        return
+      }
     }
 
     // This grants a real shell on the host (not sandboxed to the site), so it's

@@ -306,6 +306,7 @@ export async function runDeploy(
 
 export const deployRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // POST /:id/deploy — trigger deploy (or queue if one is running)
   app.post('/:id/deploy', async (request, reply) => {

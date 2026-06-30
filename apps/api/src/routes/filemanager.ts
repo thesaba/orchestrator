@@ -87,6 +87,7 @@ async function getSite(app: any, request: any) {
 // ── Plugin ────────────────────────────────────────────────────────────────────
 export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // ── List directory ─────────────────────────────────────────────────────────
   app.get('/:id/files', async (request, reply) => {

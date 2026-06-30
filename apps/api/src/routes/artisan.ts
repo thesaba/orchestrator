@@ -26,6 +26,7 @@ const artisanBuffers  = new Map<number, string[]>()
 
 export const artisanRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // ── List available commands ────────────────────────────────────────────────
 

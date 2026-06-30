@@ -38,6 +38,7 @@ async function sudoWriteAndReload(filePath: string, content: string, phpVersion:
 
 export const phpFpmRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   function poolPath(domain: string, phpVersion: string) {
     return `/etc/php/${phpVersion}/fpm/pool.d/${domain.replace(/[^a-zA-Z0-9.-]/g, '_')}.conf`

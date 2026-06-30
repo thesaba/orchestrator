@@ -857,6 +857,7 @@ export interface UserRecord {
   id: number
   email: string
   role: 'admin' | 'developer' | 'viewer'
+  allSitesAccess: boolean
   createdAt: string
 }
 
@@ -865,12 +866,12 @@ export const usersApi = {
     request<{ users: UserRecord[] }>('/users'),
   create: (data: { email: string; password: string; role: string }) =>
     request<UserRecord>('/users', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: { email?: string; role?: string }) =>
+  update: (id: number, data: { email?: string; role?: string; allSitesAccess?: boolean }) =>
     request<UserRecord>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   remove: (id: number) =>
     request<{ ok: boolean }>(`/users/${id}`, { method: 'DELETE' }),
   getSites: (id: number) =>
-    request<{ siteIds: number[] }>(`/users/${id}/sites`),
+    request<{ siteIds: number[]; allSitesAccess: boolean }>(`/users/${id}/sites`),
   setSites: (id: number, siteIds: number[]) =>
     request<{ ok: boolean; siteIds: number[] }>(`/users/${id}/sites`, {
       method: 'PUT',

@@ -26,6 +26,7 @@ async function sudoRemoveCron(filePath: string) {
 
 export const schedulerRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   function cronPath(domain: string) {
     return `/etc/cron.d/${domain.replace(/[^a-zA-Z0-9-]/g, '-')}-scheduler`

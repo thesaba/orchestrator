@@ -24,6 +24,7 @@ function resolvedScriptsDir(): string {
 
 export const provisionRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // ── POST /:id/provision ─────────────────────────────────────────────────
   app.post('/:id/provision', {

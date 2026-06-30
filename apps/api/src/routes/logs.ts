@@ -6,6 +6,7 @@ const LOG_LEVELS = ['emergency','alert','critical','error','warning','notice','i
 
 export const logsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // GET /:id/logs?level=error&search=query&lines=200
   app.get('/:id/logs', async (request, reply) => {

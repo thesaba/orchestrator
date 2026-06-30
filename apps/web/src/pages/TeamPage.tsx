@@ -46,10 +46,11 @@ export function TeamPage() {
   const [deleteSaving, setDeleteSaving] = useState(false)
 
   // Site access modal
-  const [accessUser,    setAccessUser]    = useState<UserRecord | null>(null)
-  const [assignedSites, setAssignedSites] = useState<number[]>([])
-  const [accessSaving,  setAccessSaving]  = useState(false)
-  const [accessLoading, setAccessLoading] = useState(false)
+  const [accessUser,     setAccessUser]     = useState<UserRecord | null>(null)
+  const [assignedSites,  setAssignedSites]  = useState<number[]>([])
+  const [accessAllSites, setAccessAllSites] = useState(false)
+  const [accessSaving,   setAccessSaving]   = useState(false)
+  const [accessLoading,  setAccessLoading]  = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -81,6 +82,13 @@ export function TeamPage() {
       setInviteEmail('')
       setInvitePassword('')
       setInviteRole('developer')
+      // Immediately prompt for site access on non-admin users — admins get
+      // full access automatically and have nothing to configure here.
+      if (user.role !== 'admin') {
+        setAccessUser(user)
+        setAssignedSites([])
+        setAccessAllSites(false)
+      }
     } catch (e: unknown) {
       setInviteError((e as Error).message)
     } finally {
@@ -132,8 +140,10 @@ export function TeamPage() {
     try {
       const res = await usersApi.getSites(user.id)
       setAssignedSites(res.siteIds)
+      setAccessAllSites(res.allSitesAccess)
     } catch {
       setAssignedSites([])
+      setAccessAllSites(false)
     } finally {
       setAccessLoading(false)
     }
@@ -143,14 +153,21 @@ export function TeamPage() {
     if (!accessUser) return
     setAccessSaving(true)
     try {
-      await usersApi.setSites(accessUser.id, assignedSites)
+      const updated = await usersApi.update(accessUser.id, { allSitesAccess: accessAllSites })
+      setUsers(u => u.map(x => x.id === updated.id ? updated : x))
+      // The specific-site list is only the active grant when "all sites" is
+      // off — but we still save it so toggling "all sites" back off later
+      // restores the prior selection instead of leaving the user with none.
+      if (!accessAllSites) {
+        await usersApi.setSites(accessUser.id, assignedSites)
+      }
       setAccessUser(null)
     } catch (e: unknown) {
       alert((e as Error).message)
     } finally {
       setAccessSaving(false)
     }
-  }, [accessUser, assignedSites])
+  }, [accessUser, assignedSites, accessAllSites])
 
   const toggleSite = (siteId: number) =>
     setAssignedSites(ids => ids.includes(siteId) ? ids.filter(x => x !== siteId) : [...ids, siteId])
@@ -189,7 +206,10 @@ export function TeamPage() {
                     <Text as="span">{u.email}</Text>
                     {u.id === currentUser?.id && <Badge tone="info">You</Badge>}
                   </InlineStack>,
-                  <Badge tone={ROLE_TONES[u.role] ?? 'info'}>{ROLE_LABELS[u.role] ?? u.role}</Badge>,
+                  <InlineStack gap="100" blockAlign="center">
+                    <Badge tone={ROLE_TONES[u.role] ?? 'info'}>{ROLE_LABELS[u.role] ?? u.role}</Badge>
+                    {u.role !== 'admin' && u.allSitesAccess && <Badge tone="attention">All sites</Badge>}
+                  </InlineStack>,
                   new Date(u.createdAt).toLocaleDateString(),
                   <InlineStack gap="200">
                     {u.role !== 'admin' && (
@@ -295,7 +315,16 @@ export function TeamPage() {
           {!accessLoading && (
             <BlockStack gap="300">
               <Text as="p" tone="subdued">
-                Select the sites this user can access. {accessUser?.role === 'viewer' ? 'Viewer: read-only access.' : 'Developer: can deploy and manage.'}
+                {accessUser?.role === 'viewer' ? 'Viewer: read-only access.' : 'Developer: can deploy and manage.'}
+              </Text>
+              <Checkbox
+                label="Access to all sites (including any created later)"
+                helpText="Skips the per-site list below — this user will see every site in the panel."
+                checked={accessAllSites}
+                onChange={setAccessAllSites}
+              />
+              <Text as="p" tone="subdued" fontWeight="medium">
+                Or select specific sites:
               </Text>
               {sites.length === 0 && <Text as="p" tone="subdued">No sites yet.</Text>}
               {sites.map(s => (
@@ -303,6 +332,7 @@ export function TeamPage() {
                   key={s.id}
                   label={`${s.domain}${s.name !== s.domain ? ` (${s.name})` : ''}`}
                   checked={assignedSites.includes(s.id)}
+                  disabled={accessAllSites}
                   onChange={() => toggleSite(s.id)}
                 />
               ))}

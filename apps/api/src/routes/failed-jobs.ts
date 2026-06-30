@@ -7,6 +7,7 @@ const exec = promisify(execCb)
 
 export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   function artisan(rootPath: string, phpVersion: string, cmd: string) {
     const artisanPath = path.join(rootPath, 'current', 'artisan')

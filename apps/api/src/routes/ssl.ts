@@ -47,6 +47,7 @@ async function getCertInfo(domain: string): Promise<{
 
 export const sslRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // ── GET /:id/ssl — cert status ───────────────────────────────────────────
   app.get('/:id/ssl', async (request, reply) => {

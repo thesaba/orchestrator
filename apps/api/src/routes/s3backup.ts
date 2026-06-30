@@ -24,6 +24,7 @@ async function getS3Settings(prisma: any): Promise<Record<string, string>> {
 
 export const s3BackupRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // POST /:siteId/database/backup/s3/:filename — upload a local backup to S3/R2
   app.post('/:siteId/database/backup/s3/:filename', async (request, reply) => {

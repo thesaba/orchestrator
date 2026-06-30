@@ -7,6 +7,7 @@ const exec = promisify(execCb)
 
 export const composerRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
+  app.addHook('preHandler', app.requireSiteAccess())
 
   // GET /:id/composer/outdated — list outdated packages
   app.get('/:id/composer/outdated', async (request, reply) => {

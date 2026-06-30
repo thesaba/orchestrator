@@ -8,7 +8,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/users
   app.get('/', async () => {
     const users = await app.prisma.user.findMany({
-      select: { id: true, email: true, role: true, createdAt: true },
+      select: { id: true, email: true, role: true, allSitesAccess: true, createdAt: true },
       orderBy: { createdAt: 'asc' }
     })
     return { users }
@@ -51,8 +51,9 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
       body: {
         type: 'object',
         properties: {
-          email: { type: 'string', minLength: 3, maxLength: 254 },
-          role:  { type: 'string', enum: ['admin', 'developer', 'viewer'] }
+          email:          { type: 'string', minLength: 3, maxLength: 254 },
+          role:           { type: 'string', enum: ['admin', 'developer', 'viewer'] },
+          allSitesAccess: { type: 'boolean' }
         },
         additionalProperties: false
       }
@@ -60,7 +61,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
   }, async (request, reply) => {
     const targetId = Number((request.params as { id: string }).id)
     const caller = request.user as { userId: number }
-    const { email, role } = request.body as { email?: string; role?: string }
+    const { email, role, allSitesAccess } = request.body as { email?: string; role?: string; allSitesAccess?: boolean }
 
     if (role && caller.userId === targetId) {
       return reply.code(400).send({ error: 'You cannot change your own role.' })
@@ -71,11 +72,15 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
 
     const updated = await app.prisma.user.update({
       where: { id: targetId },
-      data: { ...(email ? { email } : {}), ...(role ? { role } : {}) },
-      select: { id: true, email: true, role: true, createdAt: true }
+      data: {
+        ...(email ? { email } : {}),
+        ...(role ? { role } : {}),
+        ...(allSitesAccess !== undefined ? { allSitesAccess } : {})
+      },
+      select: { id: true, email: true, role: true, allSitesAccess: true, createdAt: true }
     })
 
-    app.audit('user.updated', { req: request, meta: { targetId, email, role } })
+    app.audit('user.updated', { req: request, meta: { targetId, email, role, allSitesAccess } })
     return updated
   })
 
@@ -114,7 +119,7 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
       where: { userId },
       select: { siteId: true }
     })
-    return { siteIds: access.map((a) => a.siteId) }
+    return { siteIds: access.map((a) => a.siteId), allSitesAccess: user.allSitesAccess }
   })
 
   // PUT /api/users/:id/sites — replace all site assignments
