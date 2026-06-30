@@ -86,6 +86,15 @@ export function SystemStatsCard() {
               percent={stats.disk.percent}
               detail={`${fmt(stats.disk.used)} / ${fmt(stats.disk.total)}`}
             />
+            <StatRow
+              label="Swap"
+              percent={stats.swap.percent}
+              detail={
+                stats.swap.total > 0
+                  ? `${fmt(stats.swap.used)} / ${fmt(stats.swap.total)}`
+                  : 'Not configured'
+              }
+            />
           </BlockStack>
         )}
       </BlockStack>

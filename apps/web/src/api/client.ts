@@ -354,6 +354,7 @@ export interface SystemStats {
   cpu: { load1: number; load5: number; load15: number; cores: number; percent: number }
   ram: { total: number; used: number; free: number; percent: number }
   disk: { total: number; used: number; percent: number }
+  swap: { total: number; used: number; percent: number }
   uptime: number
   hostname: string
 }

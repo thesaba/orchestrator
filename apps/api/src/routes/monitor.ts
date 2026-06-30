@@ -23,6 +23,26 @@ async function getDiskStats() {
   }
 }
 
+// Node's `os` module only exposes physical RAM (os.totalmem/freemem) — it has
+// no swap API. `free -b` is present on every Linux distro and gives us the
+// swap row in bytes; on platforms without it (e.g. macOS dev machines) this
+// just falls back to "no swap", which is fine since production is Linux.
+async function getSwapStats() {
+  try {
+    const { stdout } = await exec("free -b | awk '/^Swap:/{print $2,$3}'")
+    const [totalRaw, usedRaw] = stdout.trim().split(/\s+/)
+    const total = parseInt(totalRaw) || 0
+    const used = parseInt(usedRaw) || 0
+    return {
+      total,
+      used,
+      percent: total > 0 ? Math.round((used / total) * 100) : 0
+    }
+  } catch {
+    return { total: 0, used: 0, percent: 0 }
+  }
+}
+
 async function checkService(name: string): Promise<'active' | 'inactive'> {
   try {
     await exec(`systemctl is-active --quiet ${name}`)
@@ -38,7 +58,7 @@ async function getSystemStats() {
   const totalMem = os.totalmem()
   const freeMem = os.freemem()
   const usedMem = totalMem - freeMem
-  const disk = await getDiskStats()
+  const [disk, swap] = await Promise.all([getDiskStats(), getSwapStats()])
 
   return {
     cpu: {
@@ -55,6 +75,7 @@ async function getSystemStats() {
       percent: Math.round((usedMem / totalMem) * 100)
     },
     disk,
+    swap,
     uptime: Math.floor(os.uptime()),
     hostname: os.hostname()
   }
