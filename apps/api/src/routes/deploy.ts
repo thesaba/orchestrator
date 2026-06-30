@@ -31,6 +31,23 @@ const DEPLOY_TIMEOUT_MS = Number(process.env.DEPLOY_TIMEOUT_MS ?? 25 * 60_000)
 // log column empty/null forever, even though lines were actually produced.
 const LOG_FLUSH_INTERVAL_MS = 5_000
 
+// Called from index.ts on SIGTERM/SIGINT (i.e. `systemctl restart`, or any
+// graceful shutdown) before the process exits. `spawn(..., { detached: true })`
+// means a deploy's child process (deploy.sh, and whatever it execs — git,
+// composer, npm/vite, artisan migrate) survives the API process dying; if we
+// don't kill it here, it keeps running in the background as a "ghost" deploy
+// that can finish the symlink swap and migrations *after* the next API startup
+// has already marked its Deployment row 'failed' via reconcileOrphanedDeployments
+// — meaning the panel says the deploy failed while the site was actually,
+// silently, fully redeployed underneath it. Killing the whole process group
+// here keeps reality consistent with the 'failed' status the row will get.
+export function killAllRunningDeploys(app: FastifyInstance) {
+  for (const [siteId, proc] of deployProcs) {
+    app.log.warn(`Killing in-flight deploy for site ${siteId} due to API shutdown.`)
+    try { process.kill(-proc.pid!, 'SIGKILL') } catch { try { proc.kill('SIGKILL') } catch {/* already gone */} }
+  }
+}
+
 // On API startup, any Deployment row still 'running' is guaranteed orphaned —
 // deployEmitters/deployProcs/deployLogBuffers are in-memory only, so nothing
 // from a previous process lifetime can still be tracking it. Mark these

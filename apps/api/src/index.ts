@@ -13,7 +13,7 @@ import { dbManageRoutes } from './routes/db-manage'
 import { authRoutes } from './routes/auth'
 import { sitesRoutes } from './routes/sites'
 import { provisionRoutes } from './routes/provision'
-import { deployRoutes, reconcileOrphanedDeployments } from './routes/deploy'
+import { deployRoutes, reconcileOrphanedDeployments, killAllRunningDeploys } from './routes/deploy'
 import { webhookRoutes } from './routes/webhooks'
 import { monitorRoutes } from './routes/monitor'
 import { configRoutes } from './routes/config'
@@ -114,6 +114,24 @@ async function start() {
 
   // Start uptime monitor after server is listening
   startUptimeMonitor(app.prisma)
+
+  // Graceful shutdown: kill any in-flight deploys before exiting. Deploy
+  // child processes are spawned `detached: true` so they survive this
+  // process dying — without this, a `systemctl restart` (or any SIGTERM)
+  // issued while a deploy is running leaves it as an untracked "ghost"
+  // process that keeps building/migrating/swapping in the background even
+  // after the next startup's reconcileOrphanedDeployments() has already
+  // marked its row 'failed'. That desync (panel says failed, site actually
+  // got redeployed) is exactly what we want to avoid — so kill it here
+  // instead of letting it run loose.
+  const shutdown = async (signal: string) => {
+    app.log.warn(`Received ${signal} — shutting down. Killing any in-flight deploys first.`)
+    killAllRunningDeploys(app)
+    await app.close()
+    process.exit(0)
+  }
+  process.on('SIGTERM', () => void shutdown('SIGTERM'))
+  process.on('SIGINT', () => void shutdown('SIGINT'))
 }
 
 start().catch((err) => {
