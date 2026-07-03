@@ -47,9 +47,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       if (!verified) return reply.code(401).send({ error: 'Invalid TOTP code' })
     }
 
+    // Shorter-lived session (24h default) narrows the window in which a stolen
+    // token is usable — important because this token grants server control.
+    // Configurable via JWT_EXPIRES_IN; a refresh-token flow is the follow-up
+    // for even shorter access tokens without hurting UX.
     const token = app.jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      { expiresIn: '7d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN ?? '24h' }
     )
     return { token }
   })

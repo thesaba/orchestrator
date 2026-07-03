@@ -47,12 +47,26 @@ const app = Fastify({
       target: 'pino-pretty',
       options: { colorize: true }
     }
-  }
+  },
+  // The API listens on 127.0.0.1 only and is always reached through the local
+  // nginx reverse proxy. Trusting the loopback hop makes request.ip resolve to
+  // the real client IP (from X-Forwarded-For added by nginx) instead of
+  // 127.0.0.1 — essential for correct rate-limiting, audit logging, and the
+  // loopback checks in pma-internal. Only the loopback proxy is trusted, so a
+  // client-supplied X-Forwarded-For header cannot spoof the address.
+  trustProxy: 'loopback'
 })
 
 async function start() {
   await app.register(cors, { origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000' })
-  await app.register(rateLimit, { global: false })
+  // Global backstop rate limit (per client IP) against brute-force and abuse.
+  // Individual sensitive routes set stricter overrides (e.g. login: 10/15min).
+  // The limit is generous so a normal dashboard's polling is never throttled.
+  await app.register(rateLimit, {
+    global: true,
+    max: Number(process.env.RATE_LIMIT_MAX ?? 600),
+    timeWindow: '1 minute'
+  })
   await app.register(websocket)
   await app.register(multipart, { limits: { fileSize: 512 * 1024 * 1024 } }) // 512 MB — matches nginx client_max_body_size
   await app.register(prismaPlugin)
