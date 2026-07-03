@@ -241,6 +241,11 @@ export const api = {
       request<{ ok: boolean }>(`/sites/${siteId}/database/backups/${encodeURIComponent(filename)}`, {
         method: 'DELETE'
       }),
+    restoreBackup: (siteId: number, filename: string) =>
+      request<{ ok: boolean; filename: string }>(
+        `/sites/${siteId}/database/backups/${encodeURIComponent(filename)}/restore`,
+        { method: 'POST' }
+      ),
     // Download uses raw fetch (not JSON) — triggers browser download
     getBackupSchedule: (siteId: number) =>
       request<BackupSchedule>(`/sites/${siteId}/database/backup-schedule`),

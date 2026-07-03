@@ -70,6 +70,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 ### 🗄️ Databases
 - ➕ Create & manage MySQL databases/users per site
 - 📥 Import `.sql` / `.sql.gz` dumps
+- 💾 **Scheduled backups** (cron) + **one-click restore** + S3/R2 sync
 - 🔑 One-click **phpMyAdmin SSO** (passwordless)
 - 🧪 Built-in SQL runner (read/DML, DDL blocked)
 

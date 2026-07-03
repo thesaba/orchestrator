@@ -1,11 +1,48 @@
 import { FastifyPluginAsync } from 'fastify'
 import { promises as fs } from 'fs'
 import { createReadStream } from 'fs'
-import { exec as execCb } from 'child_process'
+import { exec as execCb, spawn } from 'child_process'
 import { promisify } from 'util'
+import zlib from 'zlib'
 import path from 'path'
 
 const exec = promisify(execCb)
+
+/**
+ * Restore a .sql / .sql.gz dump into a database by streaming it into `mysql`'s
+ * stdin. Uses spawn (argv, no shell) + Node's zlib for gunzip, so the file
+ * contents and credentials are never interpreted by a shell.
+ */
+function restoreDump(
+  filePath: string,
+  isGzip: boolean,
+  creds: { user: string; pass: string; db: string }
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = ['-h', '127.0.0.1', ...(creds.user ? ['-u', creds.user] : []), creds.db]
+    const proc = spawn('mysql', args, {
+      env: { ...process.env, ...(creds.pass ? { MYSQL_PWD: creds.pass } : {}) }
+    })
+
+    let stderr = ''
+    proc.stderr.on('data', (c: Buffer) => { stderr += c.toString() })
+    proc.on('error', reject)
+    proc.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(Object.assign(new Error(stderr || `mysql exited with code ${code}`), { stderr }))
+    })
+
+    const src = createReadStream(filePath)
+    src.on('error', reject)
+    if (isGzip) {
+      const gunzip = zlib.createGunzip()
+      gunzip.on('error', reject)
+      src.pipe(gunzip).pipe(proc.stdin)
+    } else {
+      src.pipe(proc.stdin)
+    }
+  })
+}
 
 function scriptsDir(): string {
   const dir = process.env.SCRIPTS_DIR
@@ -139,6 +176,40 @@ export const databaseRoutes: FastifyPluginAsync = async (app) => {
     reply.header('Content-Type', 'application/gzip')
     reply.header('Content-Length', stat.size)
     return reply.send(createReadStream(filePath))
+  })
+
+  // ── Restore backup ──────────────────────────────────────────────────────────
+  // Destructive: replays a local .sql.gz dump back into the site's database.
+
+  app.post('/:id/database/backups/:filename/restore', async (request, reply) => {
+    const { id, filename } = request.params as { id: string; filename: string }
+    if (!SAFE_FILENAME.test(filename)) {
+      return reply.code(400).send({ error: 'Invalid filename' })
+    }
+
+    const site = await app.prisma.site.findUnique({ where: { id: Number(id) } })
+    if (!site) return reply.code(404).send({ error: 'Site not found' })
+
+    const creds = await readEnvCreds(site.rootPath)
+    if (!creds?.db) {
+      return reply.code(400).send({ error: 'Cannot read database credentials from shared/.env.' })
+    }
+
+    const filePath = path.join(site.rootPath, 'backups', filename)
+    try {
+      await fs.access(filePath)
+    } catch {
+      return reply.code(404).send({ error: 'Backup file not found' })
+    }
+
+    try {
+      await restoreDump(filePath, filename.endsWith('.gz'), creds)
+      app.audit('database.restored', { siteId: site.id, req: request, meta: { domain: site.domain, filename } })
+      return { ok: true, filename }
+    } catch (err: unknown) {
+      const e = err as { stderr?: string; message?: string }
+      return reply.code(500).send({ error: 'Restore failed', details: (e.stderr ?? e.message ?? '').slice(0, 2000) })
+    }
   })
 
   // ── Backup schedule ───────────────────────────────────────────────────────

@@ -55,6 +55,7 @@ export function DatabaseTab({ siteId, site }: Props) {
   const [creatingBackup, setCreatingBackup] = useState(false)
   const [backupError,    setBackupError]    = useState('')
   const [deletingBackup, setDeletingBackup] = useState<string | null>(null)
+  const [restoringBackup, setRestoringBackup] = useState<string | null>(null)
 
   // ── Backup schedule ───────────────────────────────────────────────────────
   const [scheduleActive,  setScheduleActive]  = useState(false)
@@ -182,6 +183,22 @@ export function DatabaseTab({ siteId, site }: Props) {
       // ignore
     } finally {
       setDeletingBackup(null)
+    }
+  }, [siteId])
+
+  const handleRestoreBackup = useCallback(async (name: string) => {
+    // Restore overwrites the live database — require explicit confirmation.
+    if (!window.confirm(
+      `Restore "${name}"?\n\nThis OVERWRITES the current database with the contents of this backup and cannot be undone.`
+    )) return
+    setRestoringBackup(name)
+    setBackupError('')
+    try {
+      await api.database.restoreBackup(siteId, name)
+    } catch (e: any) {
+      setBackupError(e?.message || 'Restore failed')
+    } finally {
+      setRestoringBackup(null)
     }
   }, [siteId])
 
@@ -335,6 +352,13 @@ export function DatabaseTab({ siteId, site }: Props) {
                     onClick={() => api.database.downloadBackup(siteId, b.name)}
                   >
                     Download
+                  </Button>
+                  <Button
+                    size="micro"
+                    loading={restoringBackup === b.name}
+                    onClick={() => handleRestoreBackup(b.name)}
+                  >
+                    Restore
                   </Button>
                   <Button
                     size="micro"
