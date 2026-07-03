@@ -18,6 +18,17 @@ if ! echo "$DOMAIN" | grep -qE '^[a-zA-Z0-9][a-zA-Z0-9.\-]+[a-zA-Z0-9]$'; then
   exit 1
 fi
 
+# DB name/user (when provided) must be plain identifiers — they are interpolated
+# into privileged SQL below, so reject anything that could break out of it.
+if [ -n "$DB_NAME" ] && ! printf '%s' "$DB_NAME" | grep -qE '^[A-Za-z0-9_]+$'; then
+  echo "ERROR: invalid db name '$DB_NAME'" >&2
+  exit 1
+fi
+if [ -n "$DB_USER" ] && ! printf '%s' "$DB_USER" | grep -qE '^[A-Za-z0-9_]+$'; then
+  echo "ERROR: invalid db user '$DB_USER'" >&2
+  exit 1
+fi
+
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
 log "=== Cleaning up $DOMAIN ==="
@@ -43,7 +54,9 @@ fi
 if [ -n "$DB_NAME" ] || [ -n "$DB_USER" ]; then
   log "[2/3] Dropping MySQL database and user..."
   [ -n "$DB_NAME" ] && sudo mysql -e "DROP DATABASE IF EXISTS \`${DB_NAME}\`;" && log "  Dropped DB: $DB_NAME"
-  [ -n "$DB_USER" ] && sudo mysql -e "DROP USER IF EXISTS '${DB_USER}'@'localhost'; FLUSH PRIVILEGES;" && log "  Dropped user: $DB_USER"
+  # provision.sh creates the user for BOTH 'localhost' (socket) and '127.0.0.1'
+  # (TCP) — drop both grantees so no orphan user/credential is left behind.
+  [ -n "$DB_USER" ] && sudo mysql -e "DROP USER IF EXISTS '${DB_USER}'@'localhost', '${DB_USER}'@'127.0.0.1'; FLUSH PRIVILEGES;" && log "  Dropped user: $DB_USER"
 else
   log "[2/3] No DB info — skipping MySQL cleanup"
 fi
