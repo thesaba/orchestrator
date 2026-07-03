@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { spawn } from 'child_process'
 import { EventEmitter } from 'events'
 import path from 'path'
+import { getCloudflareCreds, isCloudflareConfigured, upsertARecord } from '../lib/cloudflare'
 
 interface LogBuffer {
   lines: string[]
@@ -97,6 +98,19 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
           })
         } catch (err) {
           console.error('[provision] Failed to create SiteDatabase record:', err)
+        }
+
+        // Best-effort: point DNS at this server via Cloudflare, if configured.
+        // Never blocks or fails provisioning — the outcome is just logged.
+        try {
+          const creds = await getCloudflareCreds(app.prisma)
+          if (isCloudflareConfigured(creds)) {
+            addLine('\n[dns] Creating Cloudflare A record...\n')
+            const r = await upsertARecord(creds, site.domain)
+            addLine(`[dns] ${r.ok ? '✓' : '✗'} ${r.message}\n`)
+          }
+        } catch (err) {
+          addLine(`[dns] ✗ ${(err as Error).message}\n`)
         }
       }
 

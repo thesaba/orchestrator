@@ -364,6 +364,9 @@ export interface PanelSettings {
   deploy_telegram_bot_token: string
   deploy_telegram_chat_id: string
   deploy_generic_webhook: string
+  cloudflare_api_token?: string
+  cloudflare_zone_id?: string
+  server_public_ip?: string
   do_api_token?: string
   do_droplet_id?: string
 }

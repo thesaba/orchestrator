@@ -25,7 +25,10 @@ const EMPTY: PanelSettings = {
   deploy_discord_webhook: '',
   deploy_telegram_bot_token: '',
   deploy_telegram_chat_id: '',
-  deploy_generic_webhook: ''
+  deploy_generic_webhook: '',
+  cloudflare_api_token: '',
+  cloudflare_zone_id: '',
+  server_public_ip: ''
 }
 
 export function SettingsPage() {
@@ -111,7 +114,10 @@ export function SettingsPage() {
         deploy_discord_webhook: settings.deploy_discord_webhook,
         deploy_telegram_bot_token: settings.deploy_telegram_bot_token,
         deploy_telegram_chat_id: settings.deploy_telegram_chat_id,
-        deploy_generic_webhook: settings.deploy_generic_webhook
+        deploy_generic_webhook: settings.deploy_generic_webhook,
+        cloudflare_api_token: settings.cloudflare_api_token,
+        cloudflare_zone_id: settings.cloudflare_zone_id,
+        server_public_ip: settings.server_public_ip
       })
       showToast('Settings saved')
     } catch (err: unknown) {
@@ -256,6 +262,36 @@ export function SettingsPage() {
                 helpText="POSTs a JSON payload for any custom integration (n8n, Zapier, …)."
                 autoComplete="off"
                 placeholder="https://example.com/webhooks/orchestrator"
+              />
+              <Divider />
+              <Text as="h3" variant="headingSm">Cloudflare DNS (optional)</Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                When set, provisioning a site automatically creates an A record pointing the
+                domain at this server.
+              </Text>
+              <TextField
+                label="Cloudflare API token"
+                type="password"
+                value={settings.cloudflare_api_token ?? ''}
+                onChange={(v) => setSettings((s) => ({ ...s, cloudflare_api_token: v }))}
+                helpText="Scoped token with DNS edit permission. Stored encrypted. Leave blank to keep existing."
+                autoComplete="off"
+                placeholder="••••••••"
+              />
+              <TextField
+                label="Cloudflare Zone ID"
+                value={settings.cloudflare_zone_id ?? ''}
+                onChange={(v) => setSettings((s) => ({ ...s, cloudflare_zone_id: v }))}
+                autoComplete="off"
+                placeholder="Found on the domain's overview page in Cloudflare"
+              />
+              <TextField
+                label="Server public IP (optional)"
+                value={settings.server_public_ip ?? ''}
+                onChange={(v) => setSettings((s) => ({ ...s, server_public_ip: v }))}
+                helpText="Used for the A record. Auto-detected if left blank."
+                autoComplete="off"
+                placeholder="203.0.113.10"
               />
               <InlineStack align="end">
                 <Button variant="primary" onClick={handleSaveGeneral} loading={savingGeneral}>
