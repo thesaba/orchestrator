@@ -14,7 +14,7 @@ import {
 } from '@shopify/polaris'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, SiteTemplate } from '../api/client'
 import { ProvisionLog } from '../components/ProvisionLog'
 import { domainToSlug, generatePassword } from '../utils/helpers'
 
@@ -26,6 +26,7 @@ export function ProvisionPage() {
   // Form fields
   const [domain, setDomain] = useState('')
   const [name, setName] = useState('')
+  const [template, setTemplate] = useState<SiteTemplate>('laravel')
   const [phpVersion, setPhpVersion] = useState('8.2')
   const [dbName, setDbName] = useState('')
   const [dbUser, setDbUser] = useState('')
@@ -61,7 +62,7 @@ export function ProvisionPage() {
       const site = await api.sites.create({ name: name || domain, domain, phpVersion })
 
       // 2. Start provisioning
-      await api.provision.start(site.id, { dbName, dbUser, dbPassword })
+      await api.provision.start(site.id, { dbName, dbUser, dbPassword, template })
 
       setSiteId(site.id)
       setStep('provisioning')
@@ -111,16 +112,30 @@ export function ProvisionPage() {
                   />
                 </FormLayout.Group>
 
-                <Select
-                  label="PHP Version"
-                  options={[
-                    { label: 'PHP 8.1', value: '8.1' },
-                    { label: 'PHP 8.2', value: '8.2' },
-                    { label: 'PHP 8.3', value: '8.3' }
-                  ]}
-                  value={phpVersion}
-                  onChange={setPhpVersion}
-                />
+                <FormLayout.Group>
+                  <Select
+                    label="Stack template"
+                    options={[
+                      { label: 'Laravel (root → /public)', value: 'laravel' },
+                      { label: 'WordPress / plain PHP', value: 'wordpress' },
+                      { label: 'Static site (no PHP)', value: 'static' }
+                    ]}
+                    value={template}
+                    onChange={(v) => setTemplate(v as SiteTemplate)}
+                    helpText="Shapes the generated Nginx vhost (document root & routing)."
+                  />
+                  <Select
+                    label="PHP Version"
+                    disabled={template === 'static'}
+                    options={[
+                      { label: 'PHP 8.1', value: '8.1' },
+                      { label: 'PHP 8.2', value: '8.2' },
+                      { label: 'PHP 8.3', value: '8.3' }
+                    ]}
+                    value={phpVersion}
+                    onChange={setPhpVersion}
+                  />
+                </FormLayout.Group>
 
                 <Divider />
 

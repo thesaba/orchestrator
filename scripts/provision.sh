@@ -32,9 +32,36 @@ esac
 SITE_DIR="/var/www/sites/$DOMAIN"
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 
+# Stack template (optional 6th arg): shapes the generated Nginx vhost.
+TEMPLATE="${6:-laravel}"
+INDEX="index.php index.html"
+case "$TEMPLATE" in
+  laravel)
+    WEB_ROOT="$SITE_DIR/current/public"
+    MAIN_LOCATION='location / { try_files $uri $uri/ /index.php?$query_string; }'
+    ERROR_PAGE='error_page 404 /index.php;'
+    INCLUDE_PHP=1
+    ;;
+  wordpress)
+    WEB_ROOT="$SITE_DIR/current"
+    MAIN_LOCATION='location / { try_files $uri $uri/ /index.php?$args; }'
+    ERROR_PAGE=''
+    INCLUDE_PHP=1
+    ;;
+  static)
+    WEB_ROOT="$SITE_DIR/current"
+    MAIN_LOCATION='location / { try_files $uri $uri/ =404; }'
+    ERROR_PAGE=''
+    INDEX="index.html index.htm"
+    INCLUDE_PHP=0
+    ;;
+  *)
+    echo "ERROR: invalid template '$TEMPLATE' (expected laravel|wordpress|static)" >&2; exit 1 ;;
+esac
+
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
-log "=== Provisioning $DOMAIN (PHP $PHP_VER) ==="
+log "=== Provisioning $DOMAIN (PHP $PHP_VER, template: $TEMPLATE) ==="
 
 # ── 1. Directory structure ───────────────────────────────────────────────────
 log "[1/4] Creating directory structure..."
@@ -62,28 +89,32 @@ sudo mysql -e "FLUSH PRIVILEGES;"
 log "  DB: $DB_NAME  User: $DB_USER"
 
 # ── 3. Nginx config ──────────────────────────────────────────────────────────
-log "[3/4] Writing Nginx config..."
-cat > "$NGINX_CONF" <<NGINX
+log "[3/4] Writing Nginx config ($TEMPLATE)..."
+{
+  # ${MAIN_LOCATION}/${ERROR_PAGE} hold literal $uri/$args (single-quoted on
+  # assignment), so they pass through this unquoted heredoc unchanged.
+  cat <<NGINX
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
-    root ${SITE_DIR}/current/public;
+    root ${WEB_ROOT};
 
     add_header X-Frame-Options "SAMEORIGIN";
     add_header X-Content-Type-Options "nosniff";
 
-    index index.php;
+    index ${INDEX};
     charset utf-8;
 
-    location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
+    ${MAIN_LOCATION}
 
     location = /favicon.ico { access_log off; log_not_found off; }
     location = /robots.txt  { access_log off; log_not_found off; }
+    ${ERROR_PAGE}
+NGINX
 
-    error_page 404 /index.php;
+  if [ "$INCLUDE_PHP" = "1" ]; then
+    cat <<NGINX
 
     location ~ \.php\$ {
         fastcgi_pass unix:/var/run/php/php${PHP_VER}-fpm.sock;
@@ -91,12 +122,17 @@ server {
         include fastcgi_params;
         fastcgi_hide_header X-Powered-By;
     }
+NGINX
+  fi
+
+  cat <<NGINX
 
     location ~ /\.(?!well-known).* {
         deny all;
     }
 }
 NGINX
+} > "$NGINX_CONF"
 
 ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/$DOMAIN"
 

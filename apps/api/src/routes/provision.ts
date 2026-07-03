@@ -39,7 +39,8 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
           // Forbid quote/backslash/backtick so the value can never break out of
           // the single-quoted MySQL string literal in provision.sh (IDENTIFIED
           // BY '...') — i.e. no SQL injection into the privileged mysql session.
-          dbPassword: { type: 'string', minLength: 8, maxLength: 128, pattern: "^[^'\"\\\\`]+$" }
+          dbPassword: { type: 'string', minLength: 8, maxLength: 128, pattern: "^[^'\"\\\\`]+$" },
+          template:   { type: 'string', enum: ['laravel', 'wordpress', 'static'] }
         },
         additionalProperties: false
       }
@@ -47,10 +48,11 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const siteId = Number(id)
-    const { dbName, dbUser, dbPassword } = request.body as {
+    const { dbName, dbUser, dbPassword, template = 'laravel' } = request.body as {
       dbName: string
       dbUser: string
       dbPassword: string
+      template?: 'laravel' | 'wordpress' | 'static'
     }
 
     if (emitters.has(siteId)) {
@@ -71,7 +73,7 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
     logBuffers.set(siteId, { lines: [] })
 
     const script = path.join(resolvedScriptsDir(), 'provision.sh')
-    const proc = spawn('bash', [script, site.domain, site.phpVersion, dbName, dbUser, dbPassword])
+    const proc = spawn('bash', [script, site.domain, site.phpVersion, dbName, dbUser, dbPassword, template])
 
     const addLine = (raw: string) => {
       const buf = logBuffers.get(siteId)!
