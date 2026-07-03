@@ -37,6 +37,21 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    // Split large vendor libraries into separate, long-term-cacheable chunks so
+    // an app update doesn't force users to re-download React/Polaris/etc.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          polaris: ['@shopify/polaris', '@shopify/polaris-icons'],
+          charts: ['recharts'],
+          editor: ['@monaco-editor/react'],
+          terminal: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-attach']
+        }
+      }
+    }
+  },
   server: {
     port: 3000,
     proxy: {

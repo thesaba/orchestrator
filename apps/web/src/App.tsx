@@ -1,22 +1,35 @@
-import { AppProvider } from '@shopify/polaris'
+import { AppProvider, Spinner } from '@shopify/polaris'
 import enTranslations from '@shopify/polaris/locales/en.json'
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom'
-import { ComponentProps } from 'react'
+import { ComponentProps, lazy, Suspense } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AppLayout } from './components/AppLayout'
 import { InstallPrompt } from './components/InstallPrompt'
 import { LoginPage } from './pages/LoginPage'
-import { DashboardPage } from './pages/DashboardPage'
-import { SitesPage } from './pages/SitesPage'
-import { ProvisionPage } from './pages/ProvisionPage'
-import { SiteDetailPage } from './pages/SiteDetailPage'
-import { MonitoringPage } from './pages/MonitoringPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { TeamPage } from './pages/TeamPage'
-import { TasksPage } from './pages/TasksPage'
-import { NotesPage } from './pages/NotesPage'
-import { CalendarPage } from './pages/CalendarPage'
-import { ServerPage } from './pages/ServerPage'
+
+// Route-level code splitting: each page (and its heavy deps — Monaco, xterm,
+// recharts) ships as a separate chunk loaded on demand, so the initial bundle
+// stays small and mobile first-load is fast.
+const named = <T,>(p: Promise<Record<string, T>>, key: string) => p.then((m) => ({ default: m[key] as any }))
+const DashboardPage  = lazy(() => named(import('./pages/DashboardPage'), 'DashboardPage'))
+const SitesPage      = lazy(() => named(import('./pages/SitesPage'), 'SitesPage'))
+const ProvisionPage  = lazy(() => named(import('./pages/ProvisionPage'), 'ProvisionPage'))
+const SiteDetailPage = lazy(() => named(import('./pages/SiteDetailPage'), 'SiteDetailPage'))
+const MonitoringPage = lazy(() => named(import('./pages/MonitoringPage'), 'MonitoringPage'))
+const SettingsPage   = lazy(() => named(import('./pages/SettingsPage'), 'SettingsPage'))
+const TeamPage       = lazy(() => named(import('./pages/TeamPage'), 'TeamPage'))
+const TasksPage      = lazy(() => named(import('./pages/TasksPage'), 'TasksPage'))
+const NotesPage      = lazy(() => named(import('./pages/NotesPage'), 'NotesPage'))
+const CalendarPage   = lazy(() => named(import('./pages/CalendarPage'), 'CalendarPage'))
+const ServerPage     = lazy(() => named(import('./pages/ServerPage'), 'ServerPage'))
+
+function RouteFallback() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}>
+      <Spinner accessibilityLabel="Loading page" size="large" />
+    </div>
+  )
+}
 
 function PolarisLink({ children, url, ...rest }: ComponentProps<'a'> & { url: string }) {
   return <Link to={url} {...(rest as any)}>{children}</Link>
@@ -43,20 +56,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <AppLayout>
-              <Routes>
-                <Route path="/"           element={<DashboardPage />} />
-                <Route path="/sites"      element={<SitesPage />} />
-                <Route path="/sites/new"  element={<ProvisionPage />} />
-                <Route path="/sites/:id"  element={<SiteDetailPage />} />
-                <Route path="/monitoring" element={<MonitoringPage />} />
-                <Route path="/settings"   element={<SettingsPage />} />
-                <Route path="/team"       element={<AdminRoute><TeamPage /></AdminRoute>} />
-                <Route path="/server"     element={<AdminRoute><ServerPage /></AdminRoute>} />
-                <Route path="/tasks"      element={<TasksPage />} />
-                <Route path="/notes"      element={<NotesPage />} />
-                <Route path="/calendar"   element={<CalendarPage />} />
-                <Route path="*"           element={<Navigate to="/" replace />} />
-              </Routes>
+              <Suspense fallback={<RouteFallback />}>
+                <Routes>
+                  <Route path="/"           element={<DashboardPage />} />
+                  <Route path="/sites"      element={<SitesPage />} />
+                  <Route path="/sites/new"  element={<ProvisionPage />} />
+                  <Route path="/sites/:id"  element={<SiteDetailPage />} />
+                  <Route path="/monitoring" element={<MonitoringPage />} />
+                  <Route path="/settings"   element={<SettingsPage />} />
+                  <Route path="/team"       element={<AdminRoute><TeamPage /></AdminRoute>} />
+                  <Route path="/server"     element={<AdminRoute><ServerPage /></AdminRoute>} />
+                  <Route path="/tasks"      element={<TasksPage />} />
+                  <Route path="/notes"      element={<NotesPage />} />
+                  <Route path="/calendar"   element={<CalendarPage />} />
+                  <Route path="*"           element={<Navigate to="/" replace />} />
+                </Routes>
+              </Suspense>
             </AppLayout>
           </ProtectedRoute>
         }
