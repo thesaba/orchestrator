@@ -2,6 +2,7 @@ import { Page, Layout, Card, BlockStack, Text, DataTable, Badge } from '@shopify
 import { useCallback, useEffect, useState } from 'react'
 import { api, Site, ServiceStatus } from '../api/client'
 import { SystemStatsCard }    from '../components/SystemStatsCard'
+import { MetricsHistoryCard } from '../components/MetricsHistoryCard'
 import { ServiceControlCard } from '../components/ServiceControlCard'
 import { LogTailViewer }      from '../components/LogTailViewer'
 import { ActivityLog }        from '../components/ActivityLog'
@@ -39,6 +40,11 @@ export function MonitoringPage() {
   return (
     <Page title="Monitoring">
       <Layout>
+        {/* ── Resource history chart ──────────────────────────────────── */}
+        <Layout.Section>
+          <MetricsHistoryCard />
+        </Layout.Section>
+
         {/* ── Row 1: System stats + Site stats ────────────────────────── */}
         <Layout.Section variant="oneHalf">
           <SystemStatsCard />

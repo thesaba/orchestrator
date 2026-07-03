@@ -75,6 +75,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 
 ### 📊 Monitoring
 - 📈 CPU, RAM, disk & swap in real time
+- 📉 **Historical resource charts** (6h / 24h / 7d)
 - 🟢 Service status (nginx, MySQL, Redis, PHP-FPM…)
 - ⏱️ **Uptime monitoring** with history
 - 🧾 Live log viewer & failed-jobs inspector

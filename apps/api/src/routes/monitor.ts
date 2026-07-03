@@ -52,7 +52,7 @@ async function checkService(name: string): Promise<'active' | 'inactive'> {
   }
 }
 
-async function getSystemStats() {
+export async function getSystemStats() {
   const [load1, load5, load15] = os.loadavg()
   const cores = os.cpus().length
   const totalMem = os.totalmem()
@@ -112,6 +112,27 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
 
   // ── GET /system ─────────────────────────────────────────────────────────
   app.get('/system', async () => getSystemStats())
+
+  // ── GET /history?hours=24 ────────────────────────────────────────────────
+  // Historical CPU/RAM/disk samples captured by the metrics monitor.
+  app.get('/history', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: { hours: { type: 'integer', minimum: 1, maximum: 168 } },
+        additionalProperties: false
+      }
+    }
+  }, async (request) => {
+    const { hours = 24 } = request.query as { hours?: number }
+    const since = new Date(Date.now() - hours * 3_600_000)
+    const samples = await app.prisma.metricSample.findMany({
+      where: { checkedAt: { gte: since } },
+      orderBy: { checkedAt: 'asc' },
+      select: { cpuPercent: true, ramPercent: true, diskPercent: true, checkedAt: true }
+    })
+    return { hours, samples }
+  })
 
   // ── GET /services ────────────────────────────────────────────────────────
   app.get('/services', async () => {

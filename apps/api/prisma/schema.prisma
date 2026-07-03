@@ -104,6 +104,18 @@ model UptimeCheck {
   @@index([siteId, checkedAt])
 }
 
+// Time-series samples of host resource usage, captured by the metrics monitor.
+// Powers the historical CPU / RAM / disk charts on the Monitoring page.
+model MetricSample {
+  id          Int      @id @default(autoincrement())
+  cpuPercent  Int
+  ramPercent  Int
+  diskPercent Int
+  checkedAt   DateTime @default(now())
+
+  @@index([checkedAt])
+}
+
 model AuditLog {
   id        Int      @id @default(autoincrement())
   action    String

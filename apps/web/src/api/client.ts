@@ -139,7 +139,9 @@ export const api = {
       request<ServiceControlResult>(`/monitor/services/${encodeURIComponent(key)}/control`, {
         method: 'POST',
         body: JSON.stringify({ action })
-      })
+      }),
+    history: (hours = 24) =>
+      request<MetricsHistory>(`/monitor/history?hours=${hours}`)
   },
   server: {
     status: () => request<ServerStatus>('/server/status'),
@@ -387,6 +389,18 @@ export interface SystemStats {
   swap: { total: number; used: number; percent: number }
   uptime: number
   hostname: string
+}
+
+export interface MetricSample {
+  cpuPercent: number
+  ramPercent: number
+  diskPercent: number
+  checkedAt: string
+}
+
+export interface MetricsHistory {
+  hours: number
+  samples: MetricSample[]
 }
 
 export interface ServiceStatus {

@@ -41,6 +41,7 @@ import { directoryRoutes } from './routes/directory'
 import { serverRoutes } from './routes/server'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 import { startSslMonitor } from './lib/ssl-monitor'
+import { startMetricsMonitor } from './lib/metrics-monitor'
 
 const app = Fastify({
   logger: {
@@ -132,6 +133,7 @@ async function start() {
   // Start background monitors after the server is listening
   startUptimeMonitor(app.prisma)
   startSslMonitor(app)
+  startMetricsMonitor(app.prisma)
 
   // Graceful shutdown: kill any in-flight deploys before exiting. Deploy
   // child processes are spawned `detached: true` so they survive this
