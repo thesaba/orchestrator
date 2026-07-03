@@ -1,8 +1,8 @@
 import {
   Page, Card, ResourceList, ResourceItem, Text, Badge,
-  BlockStack, InlineStack, Button, Banner, Modal, TextField
+  BlockStack, InlineStack, Button, Banner, Modal, TextField, Select
 } from '@shopify/polaris'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, Site } from '../api/client'
 import { useToast } from '../context/toast'
@@ -24,6 +24,8 @@ export function SitesPage() {
   const [error,        setError]       = useState('')
   const [filterTag,    setFilterTag]   = useState('')
   const [allTags,      setAllTags]     = useState<string[]>([])
+  const [search,       setSearch]      = useState('')
+  const [sortBy,       setSortBy]      = useState('recent')
   // Clone modal
   const [cloneSource,  setCloneSource] = useState<Site | null>(null)
   const [cloneName,    setCloneName]   = useState('')
@@ -73,9 +75,25 @@ export function SitesPage() {
     } finally { setCloning(false) }
   }
 
-  const displayed = filterTag
-    ? sites.filter((s) => parseTags(s.tags).includes(filterTag))
-    : sites
+  const displayed = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const list = sites.filter((s) => {
+      if (filterTag && !parseTags(s.tags).includes(filterTag)) return false
+      if (q && !s.name.toLowerCase().includes(q) && !s.domain.toLowerCase().includes(q)) return false
+      return true
+    })
+    // Pinned sites always float to the top; the chosen sort orders the rest.
+    return [...list].sort((a, b) => {
+      if (a.pinned !== b.pinned) return Number(b.pinned) - Number(a.pinned)
+      switch (sortBy) {
+        case 'name':   return a.name.localeCompare(b.name)
+        case 'domain': return a.domain.localeCompare(b.domain)
+        case 'status': return a.status.localeCompare(b.status)
+        case 'ssl':    return (a.sslDaysLeft ?? Infinity) - (b.sslDaysLeft ?? Infinity)
+        default:       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      }
+    })
+  }, [sites, filterTag, search, sortBy])
 
   return (
     <Page
@@ -84,6 +102,41 @@ export function SitesPage() {
         <Button variant="primary" onClick={() => navigate('/sites/new')}>Add site</Button>
       }
     >
+      {/* Search + sort */}
+      {sites.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <InlineStack gap="300" align="start" blockAlign="center" wrap={false}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TextField
+                label="Search sites"
+                labelHidden
+                value={search}
+                onChange={setSearch}
+                placeholder="Search by name or domain…"
+                clearButton
+                onClearButtonClick={() => setSearch('')}
+                autoComplete="off"
+              />
+            </div>
+            <div style={{ minWidth: 180 }}>
+              <Select
+                label="Sort by"
+                labelHidden
+                value={sortBy}
+                onChange={setSortBy}
+                options={[
+                  { label: 'Most recent', value: 'recent' },
+                  { label: 'Name (A–Z)', value: 'name' },
+                  { label: 'Domain (A–Z)', value: 'domain' },
+                  { label: 'Status', value: 'status' },
+                  { label: 'SSL expiry', value: 'ssl' }
+                ]}
+              />
+            </div>
+          </InlineStack>
+        </div>
+      )}
+
       {/* Tag filter chips */}
       {allTags.length > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>

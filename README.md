@@ -106,6 +106,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🔒 **Secrets encrypted at rest** (AES-256-GCM)
 
 ### 🧠 Productivity
+- 🔎 **Search, sort & tag-filter** across your sites
 - 🗂️ Kanban **task board** · 📝 Notes · 📅 Calendar
 - 🌊 **DigitalOcean** droplet controls
 
