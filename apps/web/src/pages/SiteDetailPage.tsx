@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ArtisanCommand, Deployment, Release, Site, maintenanceApi, logsApi, redeployApi } from '../api/client'
+import { phpVersionOptions } from '../utils/php'
 import { ProvisionLog }      from '../components/ProvisionLog'
 import { ConfigEditor }      from '../components/ConfigEditor'
 import { WorkersTab }        from '../components/WorkersTab'
@@ -195,9 +196,12 @@ export function SiteDetailPage() {
   // Load Deploy Settings tab data
   useEffect(() => {
     if (tab !== TAB.SETTINGS) return
+    // Default the selector to the site's current version so it works even if
+    // server-side detection is unavailable.
+    if (site && !phpSelected) setPhpSelected(site.phpVersion)
     if (phpVersions.length === 0) {
       api.config.getPhpVersions(siteId)
-        .then((r) => { setPhpVersions(r.available); setPhpSelected(r.current) })
+        .then((r) => { setPhpVersions(r.available) })
         .catch(() => {})
     }
     if (!panelUrl) {
@@ -205,7 +209,7 @@ export function SiteDetailPage() {
         .then((s) => setPanelUrl(s.panel_url?.trim() || window.location.origin))
         .catch(() => setPanelUrl(window.location.origin))
     }
-  }, [tab, siteId, phpVersions.length, panelUrl])
+  }, [tab, siteId, phpVersions.length, panelUrl, site, phpSelected])
 
   const handlePhpSwitch = async () => {
     if (!phpSelected || !site || phpSelected === site.phpVersion) return
@@ -809,18 +813,18 @@ export function SiteDetailPage() {
                     Current: <strong>PHP {site.phpVersion}</strong>. Switching updates the nginx FastCGI socket and reloads nginx.
                   </Text>
                   {phpError && <Banner tone="critical" onDismiss={() => setPhpError('')}><Text as="p">{phpError}</Text></Banner>}
-                  {phpVersions.length > 0 ? (
-                    <InlineStack gap="300" blockAlign="end">
-                      <div style={{ minWidth: 140 }}>
-                        <Select label="Available versions" options={phpVersions.map((v) => ({ label: `PHP ${v}`, value: v }))}
-                          value={phpSelected} onChange={setPhpSelected} />
-                      </div>
-                      <Button variant="primary" onClick={handlePhpSwitch} loading={phpSwitching}
-                        disabled={phpSelected === site.phpVersion || phpSwitching}>Switch</Button>
-                    </InlineStack>
-                  ) : (
-                    <Text as="p" variant="bodySm" tone="subdued">Detecting installed PHP versions…</Text>
-                  )}
+                  <InlineStack gap="300" blockAlign="end">
+                    <div style={{ minWidth: 140 }}>
+                      <Select
+                        label="PHP version"
+                        options={phpVersionOptions(phpVersions)}
+                        value={phpSelected || site.phpVersion}
+                        onChange={setPhpSelected}
+                      />
+                    </div>
+                    <Button variant="primary" onClick={handlePhpSwitch} loading={phpSwitching}
+                      disabled={(phpSelected || site.phpVersion) === site.phpVersion || phpSwitching}>Switch</Button>
+                  </InlineStack>
                 </BlockStack>
 
                 <Divider />

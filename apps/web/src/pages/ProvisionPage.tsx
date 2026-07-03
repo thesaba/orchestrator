@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, SiteTemplate } from '../api/client'
 import { ProvisionLog } from '../components/ProvisionLog'
 import { domainToSlug, generatePassword } from '../utils/helpers'
+import { phpVersionOptions, DEFAULT_PHP_VERSION } from '../utils/php'
 
 type Step = 'form' | 'provisioning' | 'done'
 
@@ -27,7 +28,7 @@ export function ProvisionPage() {
   const [domain, setDomain] = useState('')
   const [name, setName] = useState('')
   const [template, setTemplate] = useState<SiteTemplate>('laravel')
-  const [phpVersion, setPhpVersion] = useState('8.2')
+  const [phpVersion, setPhpVersion] = useState(DEFAULT_PHP_VERSION)
   const [dbName, setDbName] = useState('')
   const [dbUser, setDbUser] = useState('')
   const [dbPassword, setDbPassword] = useState('')
@@ -127,11 +128,7 @@ export function ProvisionPage() {
                   <Select
                     label="PHP Version"
                     disabled={template === 'static'}
-                    options={[
-                      { label: 'PHP 8.1', value: '8.1' },
-                      { label: 'PHP 8.2', value: '8.2' },
-                      { label: 'PHP 8.3', value: '8.3' }
-                    ]}
+                    options={phpVersionOptions()}
                     value={phpVersion}
                     onChange={setPhpVersion}
                   />
