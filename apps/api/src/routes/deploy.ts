@@ -8,6 +8,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { notifyDeploy } from '../lib/notify'
 import { decryptSecret, encryptSecret } from '../lib/crypto'
+import { isValidGitUrl } from '../lib/exec'
 
 const exec = promisify(execCb)
 
@@ -472,6 +473,13 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
 
     const existing = await app.prisma.site.findUnique({ where: { id: siteId } })
     if (!existing) return reply.code(404).send({ error: 'Site not found' })
+
+    // Validate the Git URL before it can be stored and later handed to `git`.
+    // Empty string is allowed (clears the repo); any non-empty value must be a
+    // well-formed https/http or scp-like git URL.
+    if (repoUrl !== undefined && repoUrl !== '' && !isValidGitUrl(repoUrl)) {
+      return reply.code(400).send({ error: 'Invalid repository URL. Use an https:// or git@host:owner/repo URL.' })
+    }
 
     if ((domain !== undefined && domain !== existing.domain) || disabled !== undefined) {
       const role = (request.user as { role?: string }).role ?? 'admin'

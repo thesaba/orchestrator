@@ -1,9 +1,6 @@
 import { FastifyPluginAsync } from 'fastify'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import path from 'path'
-
-const exec = promisify(execCb)
+import { run } from '../lib/exec'
 
 function scriptsDir(): string {
   const dir = process.env.SCRIPTS_DIR
@@ -151,8 +148,11 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     if (cleanup === 'true') {
       try {
         const script = path.join(scriptsDir(), 'cleanup.sh')
-        const { stdout, stderr } = await exec(
-          `bash "${script}" "${site.domain}" "${site.rootPath}" "${site.dbName ?? ''}" "${site.dbUser ?? ''}"`,
+        // execFile (argv, no shell): domain/rootPath/dbName/dbUser are passed
+        // as literal arguments and can never be interpreted as shell commands.
+        const { stdout, stderr } = await run(
+          'bash',
+          [script, site.domain, site.rootPath, site.dbName ?? '', site.dbUser ?? ''],
           { timeout: 60_000 }
         )
         cleanupLog = (stdout + stderr).trim()
@@ -181,9 +181,12 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     if (!site || !site.repoUrl) return reply.code(400).send({ error: 'No repository configured' })
 
     try {
-      const { stdout } = await exec(
-        `git ls-remote --heads "${site.repoUrl}" 2>&1`,
-        { timeout: 15_000 }
+      // execFile (argv, no shell) + `--` guard so a URL can't be parsed as an
+      // option. repoUrl is validated on write (PATCH), this is defense in depth.
+      const { stdout } = await run(
+        'git',
+        ['ls-remote', '--heads', '--', site.repoUrl],
+        { timeout: 15_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
       )
       const branches = stdout
         .split('\n')
