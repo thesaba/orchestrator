@@ -24,8 +24,16 @@ export const pmaInternalRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(503).send({ error: 'PMA_BRIDGE_SECRET is not configured.' })
     }
 
-    const ip = request.ip
-    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+    // The phpMyAdmin bridge calls this endpoint DIRECTLY over loopback
+    // (127.0.0.1:PORT), never through nginx. Check the real TCP peer address —
+    // request.socket.remoteAddress is the immediate connection and cannot be
+    // spoofed by any X-Forwarded-For header. (nginx is also configured to
+    // return 404 for /api/internal/, and request.ip likewise excludes proxied
+    // clients now that trustProxy='loopback' is set — three independent layers
+    // on top of the shared-secret check below.)
+    const isLoopback = (addr: string | undefined) =>
+      addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+    if (!isLoopback(request.socket.remoteAddress) || !isLoopback(request.ip)) {
       return reply.code(403).send({ error: 'Forbidden' })
     }
 
