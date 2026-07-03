@@ -56,6 +56,7 @@ export function DatabaseTab({ siteId, site }: Props) {
   const [backupError,    setBackupError]    = useState('')
   const [deletingBackup, setDeletingBackup] = useState<string | null>(null)
   const [restoringBackup, setRestoringBackup] = useState<string | null>(null)
+  const [restoreConfirm, setRestoreConfirm] = useState<string | null>(null)
 
   // ── Backup schedule ───────────────────────────────────────────────────────
   const [scheduleActive,  setScheduleActive]  = useState(false)
@@ -187,10 +188,7 @@ export function DatabaseTab({ siteId, site }: Props) {
   }, [siteId])
 
   const handleRestoreBackup = useCallback(async (name: string) => {
-    // Restore overwrites the live database — require explicit confirmation.
-    if (!window.confirm(
-      `Restore "${name}"?\n\nThis OVERWRITES the current database with the contents of this backup and cannot be undone.`
-    )) return
+    setRestoreConfirm(null)
     setRestoringBackup(name)
     setBackupError('')
     try {
@@ -356,7 +354,7 @@ export function DatabaseTab({ siteId, site }: Props) {
                   <Button
                     size="micro"
                     loading={restoringBackup === b.name}
-                    onClick={() => handleRestoreBackup(b.name)}
+                    onClick={() => setRestoreConfirm(b.name)}
                   >
                     Restore
                   </Button>
@@ -482,6 +480,30 @@ export function DatabaseTab({ siteId, site }: Props) {
               placeholder="myapp_user"
               helpText="A new MySQL user will be created with GRANT ALL on this database"
             />
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+
+      {/* ── Restore confirmation ── */}
+      <Modal
+        open={!!restoreConfirm}
+        onClose={() => setRestoreConfirm(null)}
+        title="Restore database backup?"
+        primaryAction={{
+          content: 'Restore & overwrite',
+          destructive: true,
+          loading: restoringBackup === restoreConfirm,
+          onAction: () => restoreConfirm && handleRestoreBackup(restoreConfirm)
+        }}
+        secondaryActions={[{ content: 'Cancel', onAction: () => setRestoreConfirm(null) }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="200">
+            <Text as="p">
+              This will <strong>overwrite the current database</strong> with the contents of:
+            </Text>
+            <Text as="p" fontWeight="semibold" breakWord>{restoreConfirm ?? ''}</Text>
+            <Text as="p" tone="subdued">This action cannot be undone.</Text>
           </BlockStack>
         </Modal.Section>
       </Modal>
