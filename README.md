@@ -369,7 +369,7 @@ Located in `scripts/`, invoked by the API to act on the host:
 - [ ] ♻️ Token revocation + `HttpOnly` cookie sessions
 - [ ] 🪝 Separate webhook identifier from HMAC secret
 - [ ] 🐳 Docker-based deploy targets
-- [ ] 🧪 Expanded automated test coverage
+- [x] 🧪 Unit tests for crypto / validation / alerts (expanding coverage)
 
 ---
 
@@ -382,7 +382,13 @@ Contributions are welcome! 🎉
 3. ✅ Commit your changes — `git commit -m "feat: add amazing thing"`
 4. 🚀 Push and open a Pull Request
 
-Please keep PRs focused, run `pnpm build` before submitting, and follow the existing code style.
+Please keep PRs focused, follow the existing code style, and before submitting:
+
+```bash
+pnpm --filter api build   # type-check the backend
+pnpm --filter api test    # run the unit tests (node:test via tsx)
+pnpm --filter web build   # type-check + build the frontend
+```
 
 ---
 

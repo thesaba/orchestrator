@@ -8,7 +8,7 @@ import { sendNotification } from './notify'
 // on every run.
 const THRESHOLDS = [1, 3, 7, 14]
 
-function bucketFor(daysLeft: number): number | null {
+export function bucketFor(daysLeft: number): number | null {
   for (const t of THRESHOLDS) if (daysLeft <= t) return t
   return null // more than the largest threshold away — nothing to alert
 }
