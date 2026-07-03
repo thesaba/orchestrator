@@ -351,6 +351,10 @@ export interface PanelSettings {
   panel_url: string
   notify_email: string
   deploy_slack_webhook: string
+  deploy_discord_webhook: string
+  deploy_telegram_bot_token: string
+  deploy_telegram_chat_id: string
+  deploy_generic_webhook: string
   do_api_token?: string
   do_droplet_id?: string
 }

@@ -65,6 +65,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🩺 Post-deploy **health checks** with **auto-rollback**
 - 🧩 Custom **pre / post-deploy hooks**
 - 📜 Live streaming deploy logs (SSE)
+- 🔔 **Notifications** on deploy events — Slack, Discord, Telegram, email & generic webhook
 
 ### 🗄️ Databases
 - ➕ Create & manage MySQL databases/users per site

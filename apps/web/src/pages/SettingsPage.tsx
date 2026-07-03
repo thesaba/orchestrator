@@ -21,7 +21,11 @@ const EMPTY: PanelSettings = {
   panel_title: '',
   panel_url: '',
   notify_email: '',
-  deploy_slack_webhook: ''
+  deploy_slack_webhook: '',
+  deploy_discord_webhook: '',
+  deploy_telegram_bot_token: '',
+  deploy_telegram_chat_id: '',
+  deploy_generic_webhook: ''
 }
 
 export function SettingsPage() {
@@ -84,7 +88,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     api.settings.get().then((s) => {
-      setSettings(s)
+      // Merge over defaults so keys absent from the response stay '' (controlled).
+      setSettings((prev) => ({ ...prev, ...s }))
       if ((s as any).s3_access_key)    setS3AccessKey((s as any).s3_access_key)
       if ((s as any).s3_region)        setS3Region((s as any).s3_region)
       if ((s as any).s3_bucket)        setS3Bucket((s as any).s3_bucket)
@@ -102,7 +107,11 @@ export function SettingsPage() {
         panel_title: settings.panel_title,
         panel_url: settings.panel_url,
         notify_email: settings.notify_email,
-        deploy_slack_webhook: settings.deploy_slack_webhook
+        deploy_slack_webhook: settings.deploy_slack_webhook,
+        deploy_discord_webhook: settings.deploy_discord_webhook,
+        deploy_telegram_bot_token: settings.deploy_telegram_bot_token,
+        deploy_telegram_chat_id: settings.deploy_telegram_chat_id,
+        deploy_generic_webhook: settings.deploy_generic_webhook
       })
       showToast('Settings saved')
     } catch (err: unknown) {
@@ -214,6 +223,39 @@ export function SettingsPage() {
                 helpText="Post deploy results to a Slack channel. Leave blank to disable."
                 autoComplete="off"
                 placeholder="https://hooks.slack.com/services/…"
+              />
+              <TextField
+                label="Discord webhook URL"
+                value={settings.deploy_discord_webhook}
+                onChange={(v) => setSettings((s) => ({ ...s, deploy_discord_webhook: v }))}
+                helpText="Post deploy & SSL alerts to a Discord channel. Leave blank to disable."
+                autoComplete="off"
+                placeholder="https://discord.com/api/webhooks/…"
+              />
+              <TextField
+                label="Telegram bot token"
+                type="password"
+                value={settings.deploy_telegram_bot_token}
+                onChange={(v) => setSettings((s) => ({ ...s, deploy_telegram_bot_token: v }))}
+                helpText="From @BotFather. Stored encrypted. Leave blank to keep existing / disable."
+                autoComplete="off"
+                placeholder="123456:ABC-DEF…"
+              />
+              <TextField
+                label="Telegram chat ID"
+                value={settings.deploy_telegram_chat_id}
+                onChange={(v) => setSettings((s) => ({ ...s, deploy_telegram_chat_id: v }))}
+                helpText="Numeric chat/channel ID the bot posts to."
+                autoComplete="off"
+                placeholder="-1001234567890"
+              />
+              <TextField
+                label="Generic webhook URL"
+                value={settings.deploy_generic_webhook}
+                onChange={(v) => setSettings((s) => ({ ...s, deploy_generic_webhook: v }))}
+                helpText="POSTs a JSON payload for any custom integration (n8n, Zapier, …)."
+                autoComplete="off"
+                placeholder="https://example.com/webhooks/orchestrator"
               />
               <InlineStack align="end">
                 <Button variant="primary" onClick={handleSaveGeneral} loading={savingGeneral}>

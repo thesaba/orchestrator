@@ -3,14 +3,21 @@ import bcrypt from 'bcryptjs'
 import { writeSecret } from '../lib/crypto'
 
 // Stored encrypted at rest (AES-256-GCM). Read back via readSecret() at the
-// point of use (db-manage, s3backup, digitalocean).
-const ENCRYPTED_SETTING_KEYS = new Set(['mysql_root_password', 's3_secret_key', 'do_api_token'])
+// point of use (db-manage, s3backup, digitalocean, notify).
+const ENCRYPTED_SETTING_KEYS = new Set([
+  'mysql_root_password', 's3_secret_key', 'do_api_token', 'deploy_telegram_bot_token'
+])
 
 const ALLOWED_KEYS = new Set([
   'panel_title',
   'panel_url',
   'notify_email',
   'deploy_slack_webhook',
+  // Additional notification channels
+  'deploy_discord_webhook',
+  'deploy_telegram_bot_token',
+  'deploy_telegram_chat_id',
+  'deploy_generic_webhook',
   // S3/R2 backup
   's3_access_key',
   's3_secret_key',
@@ -26,7 +33,7 @@ const ALLOWED_KEYS = new Set([
 ])
 
 // These keys have their values redacted (write-only) in GET responses
-const REDACTED_KEYS = new Set(['s3_secret_key', 'mysql_root_password', 'do_api_token'])
+const REDACTED_KEYS = new Set(['s3_secret_key', 'mysql_root_password', 'do_api_token', 'deploy_telegram_bot_token'])
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
