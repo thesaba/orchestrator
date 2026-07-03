@@ -1,12 +1,14 @@
 import { FastifyPluginAsync } from 'fastify'
 import { promises as fs, createReadStream, createWriteStream } from 'fs'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import { pipeline } from 'stream/promises'
 import path from 'path'
+import { execFileP } from '../lib/exec'
 
-const exec = promisify(execCb)
 const MAX_EDIT_BYTES = 10 * 1024 * 1024 // 10 MB
+
+// Prefix relative paths with "./" so a name beginning with "-" can never be
+// misread as a command-line option by zip/tar/etc.
+const optSafe = (p: string) => (p.startsWith('-') ? `./${p}` : p)
 
 // ── Security: resolve path inside site root ────────────────────────────────────
 function jail(rootPath: string, userPath: string): string {
@@ -46,9 +48,8 @@ async function toEntry(absPath: string, name: string): Promise<FileEntry | null>
     let owner = String(st.uid)
     let group = String(st.gid)
     try {
-      const { stdout } = await exec(
-        `stat -c '%U %G' "${absPath.replace(/["\\]/g, '\\$&')}" 2>/dev/null`
-      )
+      // execFile (argv, no shell) — the path can never be interpreted as a command.
+      const { stdout } = await execFileP('stat', ['-c', '%U %G', absPath])
       const parts = stdout.trim().split(' ')
       if (parts[0]) owner = parts[0]
       if (parts[1]) group = parts[1]
@@ -258,7 +259,8 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
 
     await fs.mkdir(path.dirname(absTo), { recursive: true })
     await fs.rename(absFrom, absTo).catch(async () => {
-      await exec(`mv "${absFrom.replace(/["\\]/g,'\\$&')}" "${absTo.replace(/["\\]/g,'\\$&')}" 2>&1`)
+      // Cross-device fallback: copy then remove (argv-safe, no shell).
+      await execFileP('mv', ['--', absFrom, absTo])
     })
     app.audit('filemanager.rename', { siteId: site.id, meta: { from, to, domain: site.domain } })
     return { ok: true }
@@ -281,7 +283,7 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
       try {
         const abs = jail(site.rootPath, p)
         const target = path.join(absDest, path.basename(abs))
-        await exec(`cp -r "${abs.replace(/["\\]/g,'\\$&')}" "${target.replace(/["\\]/g,'\\$&')}" 2>&1`)
+        await fs.cp(abs, target, { recursive: true })
       } catch { /* skip bad path */ }
     }
     app.audit('filemanager.copy', { siteId: site.id, meta: { count: paths.length, dest, domain: site.domain } })
@@ -305,7 +307,7 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
       try {
         const abs = jail(site.rootPath, p)
         const target = path.join(absDest, path.basename(abs))
-        await exec(`mv "${abs.replace(/["\\]/g,'\\$&')}" "${target.replace(/["\\]/g,'\\$&')}" 2>&1`)
+        await fs.rename(abs, target).catch(() => execFileP('mv', ['--', abs, target]))
       } catch { /* skip */ }
     }
     app.audit('filemanager.move', { siteId: site.id, meta: { count: paths.length, dest, domain: site.domain } })
@@ -329,10 +331,9 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     for (const p of paths) {
       try { relPaths.push(path.relative(site.rootPath, jail(site.rootPath, p))) } catch { }
     }
-    const quoted = relPaths.map(p => `"${p.replace(/["\\]/g,'\\$&')}"`).join(' ')
-    const { stdout, stderr } = await exec(
-      `cd "${site.rootPath.replace(/["\\]/g,'\\$&')}" && zip -r "${absDest.replace(/["\\]/g,'\\$&')}" ${quoted} 2>&1`,
-      { timeout: 300_000 }
+    const { stdout, stderr } = await execFileP(
+      'zip', ['-r', absDest, ...relPaths.map(optSafe)],
+      { cwd: site.rootPath, timeout: 300_000 }
     ).catch((e: any) => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? e.message }))
 
     app.audit('filemanager.zip', { siteId: site.id, meta: { count: paths.length, dest, domain: site.domain } })
@@ -353,8 +354,8 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     catch (e: any) { return reply.code(403).send({ error: e.message }) }
 
     await fs.mkdir(absDest, { recursive: true })
-    const { stdout, stderr } = await exec(
-      `unzip -o "${absPath.replace(/["\\]/g,'\\$&')}" -d "${absDest.replace(/["\\]/g,'\\$&')}" 2>&1`,
+    const { stdout, stderr } = await execFileP(
+      'unzip', ['-o', absPath, '-d', absDest],
       { timeout: 300_000 }
     ).catch((e: any) => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? e.message }))
 
@@ -379,10 +380,9 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     for (const p of paths) {
       try { relPaths.push(path.relative(site.rootPath, jail(site.rootPath, p))) } catch { }
     }
-    const quoted = relPaths.map(p => `"${p.replace(/["\\]/g,'\\$&')}"`).join(' ')
-    await exec(
-      `cd "${site.rootPath.replace(/["\\]/g,'\\$&')}" && tar -czf "${absDest.replace(/["\\]/g,'\\$&')}" ${quoted} 2>&1`,
-      { timeout: 300_000 }
+    await execFileP(
+      'tar', ['-czf', absDest, '--', ...relPaths.map(optSafe)],
+      { cwd: site.rootPath, timeout: 300_000 }
     )
     return { ok: true }
   })
@@ -401,8 +401,8 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     catch (e: any) { return reply.code(403).send({ error: e.message }) }
 
     await fs.mkdir(absDest, { recursive: true })
-    const { stdout, stderr } = await exec(
-      `tar -xf "${absPath.replace(/["\\]/g,'\\$&')}" -C "${absDest.replace(/["\\]/g,'\\$&')}" 2>&1`,
+    const { stdout, stderr } = await execFileP(
+      'tar', ['-xf', absPath, '-C', absDest],
       { timeout: 300_000 }
     ).catch((e: any) => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? e.message }))
 
@@ -422,10 +422,12 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
     const { paths, mode, recursive = false } = request.body as { paths: string[]; mode: string; recursive?: boolean }
+    const flags = recursive ? ['-R'] : []
     for (const p of paths) {
       try {
         const abs = jail(site.rootPath, p)
-        await exec(`chmod ${recursive ? '-R' : ''} ${mode} "${abs.replace(/["\\]/g,'\\$&')}" 2>&1`)
+        // mode is schema-validated (^[0-7]{3,4}$); argv (no shell) makes abs inert.
+        await execFileP('chmod', [...flags, mode, '--', abs])
       } catch { /* skip */ }
     }
     app.audit('filemanager.chmod', { siteId: site.id, meta: { mode, count: paths.length, domain: site.domain } })
@@ -437,8 +439,8 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     schema: { body: { type: 'object', required: ['paths', 'owner'], additionalProperties: false,
       properties: {
         paths: { type: 'array', items: { type: 'string' } },
-        owner: { type: 'string', maxLength: 64 },
-        group: { type: 'string', maxLength: 64 },
+        owner: { type: 'string', maxLength: 64, pattern: '^[a-zA-Z0-9._-]+$' },
+        group: { type: 'string', maxLength: 64, pattern: '^[a-zA-Z0-9._-]+$' },
         recursive: { type: 'boolean' }
       } } }
   }, async (request, reply) => {
@@ -447,10 +449,12 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
 
     const { paths, owner, group, recursive = false } = request.body as { paths: string[]; owner: string; group?: string; recursive?: boolean }
     const spec = group ? `${owner}:${group}` : owner
+    const flags = recursive ? ['-R'] : []
     for (const p of paths) {
       try {
         const abs = jail(site.rootPath, p)
-        await exec(`chown ${recursive ? '-R' : ''} "${spec.replace(/["\\]/g,'\\$&')}" "${abs.replace(/["\\]/g,'\\$&')}" 2>&1`)
+        // owner/group are schema-validated ([a-zA-Z0-9._-]); argv (no shell).
+        await execFileP('chown', [...flags, spec, '--', abs])
       } catch { /* skip */ }
     }
     app.audit('filemanager.chown', { siteId: site.id, meta: { owner: spec, count: paths.length, domain: site.domain } })
@@ -493,10 +497,9 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const tmpFile = `/tmp/fm-dl-${Date.now()}.zip`
-    const quoted = relPaths.map(p => `"${p.replace(/["\\]/g,'\\$&')}"`).join(' ')
-    await exec(
-      `cd "${site.rootPath.replace(/["\\]/g,'\\$&')}" && zip -r "${tmpFile}" ${quoted} 2>&1`,
-      { timeout: 120_000 }
+    await execFileP(
+      'zip', ['-r', tmpFile, ...relPaths.map(optSafe)],
+      { cwd: site.rootPath, timeout: 120_000 }
     )
 
     reply.header('Content-Disposition', `attachment; filename="${name}.zip"`)
@@ -559,13 +562,13 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     try { absPath = jail(site.rootPath, userPath) }
     catch (e: any) { return reply.code(403).send({ error: e.message }) }
 
-    const safeQ = q.replace(/["\\]/g, '\\$&')
-    const cmd = type === 'content'
-      ? `grep -rl "${safeQ}" "${absPath.replace(/["\\]/g,'\\$&')}" 2>/dev/null | head -100`
-      : `find "${absPath.replace(/["\\]/g,'\\$&')}" -iname "*${safeQ}*" 2>/dev/null | head -100`
-
-    const { stdout } = await exec(cmd, { timeout: 20_000 }).catch(() => ({ stdout: '' }))
-    const results = stdout.trim().split('\n').filter(Boolean).map(p => ({
+    // execFile (argv, no shell): the query and path are inert data. `--` stops
+    // a query/path starting with "-" from being parsed as an option.
+    const { stdout } = await (type === 'content'
+      ? execFileP('grep', ['-rl', '--', q, absPath], { timeout: 20_000 })
+      : execFileP('find', [absPath, '-iname', `*${q}*`], { timeout: 20_000 })
+    ).catch((e: any) => ({ stdout: e.stdout ?? '' }))
+    const results = stdout.trim().split('\n').filter(Boolean).slice(0, 100).map((p: string) => ({
       path: '/' + path.relative(site.rootPath, p),
       name: path.basename(p),
       type: 'file'
@@ -585,10 +588,9 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     try { absA = jail(site.rootPath, a); absB = jail(site.rootPath, b) }
     catch (e: any) { return reply.code(403).send({ error: e.message }) }
 
-    const { stdout } = await exec(
-      `diff -u "${absA.replace(/["\\]/g,'\\$&')}" "${absB.replace(/["\\]/g,'\\$&')}" 2>&1 || true`,
-      { timeout: 10_000 }
-    ).catch(() => ({ stdout: '' }))
+    // diff exits 1 when files differ (normal) — read stdout off the error too.
+    const { stdout } = await execFileP('diff', ['-u', '--', absA, absB], { timeout: 10_000 })
+      .catch((e: any) => ({ stdout: e.stdout ?? '' }))
 
     return { diff: stdout }
   })
@@ -611,9 +613,8 @@ export const fileManagerRoutes: FastifyPluginAsync = async (app) => {
     // For directories, get total size
     let totalSize = entry.size
     if (entry.type === 'dir') {
-      const { stdout } = await exec(
-        `du -sb "${absPath.replace(/["\\]/g,'\\$&')}" 2>/dev/null`
-      ).catch(() => ({ stdout: '0' }))
+      const { stdout } = await execFileP('du', ['-sb', '--', absPath])
+        .catch((e: any) => ({ stdout: e.stdout ?? '0' }))
       totalSize = parseInt(stdout.split('\t')[0] ?? '0', 10)
     }
 
