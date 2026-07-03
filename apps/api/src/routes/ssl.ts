@@ -2,48 +2,13 @@ import { FastifyPluginAsync } from 'fastify'
 import { spawn, exec as execCb } from 'child_process'
 import { promisify } from 'util'
 import { EventEmitter } from 'events'
+import { getCertInfo } from '../lib/ssl'
 
 const exec = promisify(execCb)
 
 // One certbot process per site at a time
 const sslEmitters = new Map<number, EventEmitter>()
 const sslLogBuffers = new Map<number, string[]>()
-
-async function getCertInfo(domain: string): Promise<{
-  active: boolean
-  expiresAt: string | null
-  issuer: string | null
-  daysLeft: number | null
-}> {
-  try {
-    // openssl s_client is not reliable on server without a live connection;
-    // parse certbot's own certificates output instead
-    const { stdout } = await exec(
-      `certbot certificates --cert-name "${domain}" 2>/dev/null || true`
-    )
-
-    const expiryMatch  = stdout.match(/Expiry Date:\s+(.+?)\s+\(/)
-    const issuerMatch  = stdout.match(/Issuer:\s+(.+)/)
-    const validMatch   = stdout.match(/Certificate Name:\s+\S/)
-
-    if (!validMatch || !stdout.includes(domain)) {
-      return { active: false, expiresAt: null, issuer: null, daysLeft: null }
-    }
-
-    const expiresAt = expiryMatch ? expiryMatch[1].trim() : null
-    const issuer    = issuerMatch ? issuerMatch[1].trim() : null
-    let daysLeft: number | null = null
-
-    if (expiresAt) {
-      const ms = new Date(expiresAt).getTime() - Date.now()
-      daysLeft = Math.max(0, Math.floor(ms / 86_400_000))
-    }
-
-    return { active: true, expiresAt, issuer, daysLeft }
-  } catch {
-    return { active: false, expiresAt: null, issuer: null, daysLeft: null }
-  }
-}
 
 export const sslRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)

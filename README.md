@@ -85,6 +85,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 ### 🖥️ Server Management
 - 🌐 Provision sites (dirs, nginx vhost, DB, user)
 - 🔒 **Let's Encrypt SSL** via Certbot (one click)
+- ⏰ **SSL expiry alerts** (14/7/3/1-day) + dashboard "expiring soon" badge
 - ✏️ In-browser **nginx & `.env` editors** (with backup + validation)
 - 🐘 Per-site **PHP version** switching
 - 👷 **Supervisor** queue workers

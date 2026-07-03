@@ -57,6 +57,8 @@ export interface Site {
   createdAt: string
   updatedAt: string
   deployments: Deployment[]
+  sslDaysLeft?: number | null   // cached by the SSL monitor; drives the expiry badge
+  sslExpiresAt?: string | null
 }
 
 export interface Deployment {

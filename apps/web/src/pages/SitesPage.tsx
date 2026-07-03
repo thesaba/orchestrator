@@ -131,6 +131,11 @@ export function SitesPage() {
                         {site.pinned ? '📌 ' : ''}{site.domain}
                       </Text>
                       {tags.map((t) => <Badge key={t} tone="info">{t}</Badge>)}
+                      {typeof site.sslDaysLeft === 'number' && site.sslDaysLeft <= 14 && (
+                        <Badge tone={site.sslDaysLeft <= 3 ? 'critical' : 'warning'}>
+                          {site.sslDaysLeft <= 0 ? 'SSL expired' : `SSL expires in ${site.sslDaysLeft}d`}
+                        </Badge>
+                      )}
                     </InlineStack>
                     <Text as="p" variant="bodySm" tone="subdued">
                       PHP {site.phpVersion} · {site.sslEnabled ? '🔒 SSL' : 'No SSL'}

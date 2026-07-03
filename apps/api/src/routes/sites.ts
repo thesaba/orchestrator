@@ -39,7 +39,26 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
       orderBy: [{ pinned: 'desc' }, { createdAt: 'desc' }],
       include: { deployments: { take: 1, orderBy: { createdAt: 'desc' } } }
     })
-    return sites.map(redactGitToken)
+
+    // Attach cached SSL expiry (populated by the background SSL monitor) so the
+    // UI can show an "expiring soon" badge without running certbot per request.
+    const cacheRows = await app.prisma.setting.findMany({
+      where: { key: { in: sites.map((s) => `ssl_cache:${s.id}`) } }
+    }).catch(() => [] as { key: string; value: string }[])
+    const sslBySite = new Map<number, { daysLeft: number | null; expiresAt: string | null }>()
+    for (const row of cacheRows) {
+      const id = Number(row.key.split(':')[1])
+      try {
+        const c = JSON.parse(row.value)
+        sslBySite.set(id, { daysLeft: c.daysLeft ?? null, expiresAt: c.expiresAt ?? null })
+      } catch { /* ignore malformed cache */ }
+    }
+
+    return sites.map((s) => ({
+      ...redactGitToken(s),
+      sslDaysLeft: sslBySite.get(s.id)?.daysLeft ?? null,
+      sslExpiresAt: sslBySite.get(s.id)?.expiresAt ?? null
+    }))
   })
 
   app.get('/:id', async (request, reply) => {
