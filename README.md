@@ -109,6 +109,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🔎 **Search, sort & tag-filter** across your sites
 - 🗂️ Kanban **task board** · 📝 Notes · 📅 Calendar
 - 🌊 **DigitalOcean** droplet controls
+- 📱 **Installable PWA** — add to home screen, works on mobile
 
 </td>
 </tr>

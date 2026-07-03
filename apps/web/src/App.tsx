@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom'
 import { ComponentProps } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AppLayout } from './components/AppLayout'
+import { InstallPrompt } from './components/InstallPrompt'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { SitesPage } from './pages/SitesPage'
@@ -70,6 +71,7 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <AppRoutes />
+          <InstallPrompt />
         </BrowserRouter>
       </AuthProvider>
     </AppProvider>

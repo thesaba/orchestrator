@@ -2,10 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Self-hosted control panel to provision, deploy, secure and monitor PHP/Laravel sites." />
+    <meta name="theme-color" content="#1a1a2e" />
+    <link rel="icon" href="/icon-192.png" />
+    <!-- iOS installable web app -->
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Orchestrator" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Orchestrator</title>
     <style>
       html, body, #root { height: 100%; margin: 0; }
+      /* Respect device safe-areas (notches) when installed as a PWA. */
+      body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
     </style>
   </head>
   <body>
