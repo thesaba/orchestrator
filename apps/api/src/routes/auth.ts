@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import bcrypt from 'bcryptjs'
 import speakeasy from 'speakeasy'
 import QRCode from 'qrcode'
+import { readSecret, writeSecret } from '../lib/crypto'
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
   // ── Login ───────────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const verified = speakeasy.totp.verify({
-        secret: user.totpSecret,
+        secret: readSecret(user.totpSecret),
         encoding: 'base32',
         token: totpCode,
         window: 1 // allow ±30s clock drift
@@ -73,10 +74,11 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       length: 20
     })
 
-    // Persist the pending secret (overwrite any previous pending one)
+    // Persist the pending secret (overwrite any previous pending one),
+    // encrypted at rest.
     await app.prisma.user.update({
       where: { id: payload.userId },
-      data: { totpSecret: secret.base32 }
+      data: { totpSecret: writeSecret(secret.base32) }
     })
 
     const otpauthUrl = secret.otpauth_url ?? `otpauth://totp/Orchestrator:${encodeURIComponent(payload.email)}?secret=${secret.base32}&issuer=Orchestrator`
@@ -104,7 +106,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!user?.totpSecret) return reply.code(400).send({ error: 'Run /2fa/setup first' })
 
     const verified = speakeasy.totp.verify({
-      secret: user.totpSecret,
+      secret: readSecret(user.totpSecret),
       encoding: 'base32',
       token: totpCode,
       window: 1

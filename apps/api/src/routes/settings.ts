@@ -1,5 +1,10 @@
 import { FastifyPluginAsync } from 'fastify'
 import bcrypt from 'bcryptjs'
+import { writeSecret } from '../lib/crypto'
+
+// Stored encrypted at rest (AES-256-GCM). Read back via readSecret() at the
+// point of use (db-manage, s3backup, digitalocean).
+const ENCRYPTED_SETTING_KEYS = new Set(['mysql_root_password', 's3_secret_key', 'do_api_token'])
 
 const ALLOWED_KEYS = new Set([
   'panel_title',
@@ -37,17 +42,22 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
   app.put('/', { preHandler: [app.requireRole(['admin'])] }, async (request, reply) => {
     const body = request.body as Record<string, string>
-    const allowed = Object.entries(body).filter(([k]) => ALLOWED_KEYS.has(k))
+    const allowed = Object.entries(body)
+      .filter(([k]) => ALLOWED_KEYS.has(k))
+      // Ignore the redaction placeholder echoed back by the UI for write-only
+      // fields — otherwise we'd overwrite a real secret with "••••••••".
+      .filter(([k, v]) => !(REDACTED_KEYS.has(k) && v === '••••••••'))
     if (allowed.length === 0) return reply.code(400).send({ error: 'No valid settings keys provided.' })
 
     await Promise.all(
-      allowed.map(([key, value]) =>
-        app.prisma.setting.upsert({
+      allowed.map(([key, rawValue]) => {
+        const value = ENCRYPTED_SETTING_KEYS.has(key) ? writeSecret(rawValue) : rawValue
+        return app.prisma.setting.upsert({
           where:  { key },
           update: { value },
           create: { key, value }
         })
-      )
+      })
     )
     return { ok: true, updated: allowed.map(([k]) => k) }
   })

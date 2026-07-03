@@ -44,3 +44,31 @@ export function decryptSecret(payload: string): string | null {
     return null
   }
 }
+
+// Shape produced by encryptSecret(): "<ivHex>:<tagHex>:<cipherHex>".
+const ENCRYPTED_RE = /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/i
+
+/** True if the value looks like encryptSecret() output (not plaintext). */
+export function isEncrypted(value: string): boolean {
+  return ENCRYPTED_RE.test(value)
+}
+
+/**
+ * Transparent read for secrets that may be stored either encrypted (new writes)
+ * or in plaintext (legacy rows written before at-rest encryption existed).
+ * Returns the plaintext value. Empty/undefined -> ''.
+ */
+export function readSecret(value: string | null | undefined): string {
+  if (!value) return ''
+  if (isEncrypted(value)) {
+    const decrypted = decryptSecret(value)
+    if (decrypted !== null) return decrypted
+  }
+  return value // legacy plaintext (or wrong key — returned as-is, never throws)
+}
+
+/** Encrypt a value for storage, but pass through empty strings unchanged. */
+export function writeSecret(value: string | null | undefined): string {
+  if (!value) return ''
+  return encryptSecret(value)
+}

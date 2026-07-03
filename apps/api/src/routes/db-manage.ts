@@ -8,6 +8,7 @@ import path from 'path'
 import mysql from 'mysql2/promise'
 import { PrismaClient } from '@prisma/client'
 import { createPmaToken } from '../lib/pma-tokens'
+import { readSecret, writeSecret } from '../lib/crypto'
 
 const exec = promisify(execCb)
 
@@ -21,7 +22,7 @@ async function getMysqlRootCreds(
     prisma.setting.findUnique({ where: { key: 'mysql_root_password' } })
   ])
   if (!userRow?.value) return null
-  return { user: userRow.value, pass: passRow?.value ?? '' }
+  return { user: userRow.value, pass: readSecret(passRow?.value) }
 }
 
 async function readEnvCreds(
@@ -51,7 +52,7 @@ export async function resolveDbCreds(
     const creds = await readEnvCreds(site.rootPath)
     return creds ? { user: creds.user, pass: creds.pass } : null
   }
-  return { user: db.dbUser, pass: db.dbPass }
+  return { user: db.dbUser, pass: readSecret(db.dbPass) }
 }
 
 function generatePassword(): string {
@@ -184,7 +185,9 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const db = await app.prisma.siteDatabase.create({
-      data: { siteId, dbName, dbUser, dbPass, isPrimary: false },
+      // Stored encrypted at rest; the plaintext dbPass above is used only for
+      // the live MySQL grants. resolveDbCreds() decrypts it on read.
+      data: { siteId, dbName, dbUser, dbPass: writeSecret(dbPass), isPrimary: false },
       select: { id: true, siteId: true, dbName: true, dbUser: true, isPrimary: true, createdAt: true }
     })
 

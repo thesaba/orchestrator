@@ -4,6 +4,7 @@
 // and the S3 backup credentials. See routes/settings.ts for the
 // allow-list/redaction rules and routes/server.ts for how this is used.
 import type { PrismaClient } from '@prisma/client'
+import { readSecret } from './crypto'
 
 const DO_API = 'https://api.digitalocean.com/v2'
 
@@ -30,7 +31,9 @@ export async function getDoCreds(prisma: PrismaClient): Promise<DOCreds> {
     getSetting(prisma, 'do_api_token'),
     getSetting(prisma, 'do_droplet_id')
   ])
-  return { token, dropletId }
+  // do_api_token is stored encrypted at rest — decrypt for use (plaintext
+  // legacy values pass through unchanged).
+  return { token: token ? readSecret(token) : null, dropletId }
 }
 
 // Generic authenticated request against the DO API. Throws DOError (with the

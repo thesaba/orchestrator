@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { readSecret } from '../lib/crypto'
 
 function getS3Client(settings: Record<string, string>): S3Client {
   const endpoint = settings.s3_endpoint
@@ -19,7 +20,9 @@ async function getS3Settings(prisma: any): Promise<Record<string, string>> {
   const settings = await prisma.setting.findMany({
     where: { key: { in: ['s3_access_key', 's3_secret_key', 's3_region', 's3_bucket', 's3_endpoint'] } }
   })
-  return Object.fromEntries(settings.map((s: any) => [s.key, s.value]))
+  return Object.fromEntries(
+    settings.map((s: any) => [s.key, s.key === 's3_secret_key' ? readSecret(s.value) : s.value])
+  )
 }
 
 export const s3BackupRoutes: FastifyPluginAsync = async (app) => {
