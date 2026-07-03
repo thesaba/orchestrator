@@ -97,7 +97,12 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
         required: ['name', 'domain'],
         properties: {
           name:   { type: 'string', minLength: 1, maxLength: 100 },
-          domain: { type: 'string', minLength: 3, maxLength: 253 }
+          // Same strict hostname pattern as POST / — the domain becomes the
+          // on-disk rootPath (/var/www/sites/<domain>) and is later passed to
+          // nginx/cleanup/rename scripts, so it must never contain path or
+          // shell metacharacters.
+          domain: { type: 'string', minLength: 3, maxLength: 253,
+                    pattern: '^[a-zA-Z0-9][a-zA-Z0-9\\-\\.]*[a-zA-Z0-9]$' }
         },
         additionalProperties: false
       }
