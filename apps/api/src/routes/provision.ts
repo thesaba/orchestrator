@@ -35,7 +35,10 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
         properties: {
           dbName:     { type: 'string', minLength: 1, maxLength: 64,  pattern: '^[a-zA-Z0-9_]+$' },
           dbUser:     { type: 'string', minLength: 1, maxLength: 32,  pattern: '^[a-zA-Z0-9_]+$' },
-          dbPassword: { type: 'string', minLength: 8, maxLength: 128 }
+          // Forbid quote/backslash/backtick so the value can never break out of
+          // the single-quoted MySQL string literal in provision.sh (IDENTIFIED
+          // BY '...') — i.e. no SQL injection into the privileged mysql session.
+          dbPassword: { type: 'string', minLength: 8, maxLength: 128, pattern: "^[^'\"\\\\`]+$" }
         },
         additionalProperties: false
       }

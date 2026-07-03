@@ -11,6 +11,24 @@ DB_NAME="${3:?db_name required}"
 DB_USER="${4:?db_user required}"
 DB_PASS="${5:?db_pass required}"
 
+# Defense in depth (the API already validates these). Guarantees no SQL/shell
+# injection even if this privileged script is ever invoked directly:
+#   - domain / db name / db user must be plain, well-formed identifiers
+#   - the db password must not contain ' " \ ` — the exact characters that
+#     could break out of the single-quoted SQL string literal (IDENTIFIED BY '…')
+if ! printf '%s' "$DOMAIN" | grep -qE '^[A-Za-z0-9][A-Za-z0-9.\-]+[A-Za-z0-9]$'; then
+  echo "ERROR: invalid domain '$DOMAIN'" >&2; exit 1
+fi
+if ! printf '%s' "$DB_NAME" | grep -qE '^[A-Za-z0-9_]+$'; then
+  echo "ERROR: invalid db name '$DB_NAME'" >&2; exit 1
+fi
+if ! printf '%s' "$DB_USER" | grep -qE '^[A-Za-z0-9_]+$'; then
+  echo "ERROR: invalid db user '$DB_USER'" >&2; exit 1
+fi
+case "$DB_PASS" in
+  *[\'\"\\\`]*) echo "ERROR: db password contains forbidden characters (' \" \\ \`)" >&2; exit 1 ;;
+esac
+
 SITE_DIR="/var/www/sites/$DOMAIN"
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 
