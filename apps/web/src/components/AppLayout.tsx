@@ -456,10 +456,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </Frame>
         {activityOpen && (
           <div style={{
-            position: 'fixed', right: 0, top: 57, bottom: 0, width: 320,
+            position: 'fixed', right: 0, top: 57, bottom: 0, width: 'min(320px, 100vw)',
             background: 'var(--p-color-bg-surface)',
             borderLeft: '1px solid var(--oc-border)',
-            zIndex: 400, overflowY: 'auto', padding: 16
+            zIndex: 400, overflowY: 'auto', padding: 16,
+            boxShadow: '-4px 0 16px rgba(0,0,0,0.08)'
           }}>
             <RecentActivityPanel onClose={() => setActivityOpen(false)} />
           </div>

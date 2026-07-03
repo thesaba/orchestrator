@@ -36,7 +36,8 @@ export function InstallPrompt() {
   }
 
   return (
-    <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 520 }}>
+    // Sits above the QuickActions FAB (bottom:24 right:24) so the two never overlap.
+    <div style={{ position: 'fixed', right: 24, bottom: 88, zIndex: 520 }}>
       <Button variant="primary" onClick={install}>📲 Install app</Button>
     </div>
   )

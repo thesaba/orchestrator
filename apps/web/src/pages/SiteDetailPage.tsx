@@ -1144,7 +1144,7 @@ export function SiteDetailPage() {
       </Modal>
 
       {deleteResult && (
-        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 999, minWidth: 360 }}>
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 999, width: 'min(420px, calc(100vw - 32px))' }}>
           <Banner tone={deleteResult.ok ? 'success' : 'critical'} onDismiss={() => setDeleteResult(null)}>
             <BlockStack gap="200">
               <Text as="p">{deleteResult.ok ? 'Server cleanup completed.' : 'Server cleanup failed — site record was still deleted.'}</Text>
