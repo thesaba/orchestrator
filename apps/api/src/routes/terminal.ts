@@ -1,6 +1,24 @@
 import { FastifyPluginAsync } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import * as nodePty from 'node-pty'
+import { existsSync } from 'fs'
+
+// Build a minimal, safe environment for the interactive shell. The API process
+// env holds secrets (JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL, PMA_BRIDGE_SECRET,
+// mysql/S3/DO credentials, …). Inheriting `...process.env` would expose every
+// one of them to anyone with terminal access — so we allowlist only the handful
+// of variables a shell actually needs.
+function buildShellEnv(): Record<string, string> {
+  const src = process.env
+  const allow = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'USER', 'LOGNAME', 'SHELL', 'TZ']
+  const env: Record<string, string> = { TERM: 'xterm-256color' }
+  for (const key of allow) {
+    const v = src[key]
+    if (typeof v === 'string') env[key] = v
+  }
+  if (!env.PATH) env.PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  return env
+}
 
 export const terminalRoutes: FastifyPluginAsync = async (app) => {
   // WebSocket: GET /terminal/:siteId?token=JWT
@@ -66,14 +84,18 @@ export const terminalRoutes: FastifyPluginAsync = async (app) => {
     // logged like any other privileged action — connect AND disconnect.
     app.audit('terminal.connect', { siteId, userId: payload.userId ?? null, meta: { domain: site.domain } })
 
-    const cwd = `${site.rootPath}/current`
+    // Prefer the live release dir; fall back to the site root, then to a safe
+    // default so node-pty.spawn() never throws on a missing cwd (which would
+    // crash the request instead of opening a shell).
+    const candidates = [`${site.rootPath}/current`, site.rootPath, '/tmp']
+    const cwd = candidates.find((c) => existsSync(c)) ?? '/tmp'
 
     const pty = nodePty.spawn('bash', [], {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
       cwd,
-      env: { ...(process.env as Record<string, string>), TERM: 'xterm-256color' }
+      env: buildShellEnv()
     })
 
     pty.onData((data: string) => {
