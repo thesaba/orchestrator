@@ -1,0 +1,20 @@
+# One-shot service that backs up the Orchestrator panel's SQLite database.
+# Paired with orchestrator-backup.timer for daily execution.
+#
+# Install:
+#   sudo cp orchestrator-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now orchestrator-backup.timer
+#
+# Run once manually:
+#   sudo systemctl start orchestrator-backup.service
+
+[Unit]
+Description=Orchestrator panel database backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=deployer
+Group=deployer
+ExecStart=/usr/bin/env bash /opt/orchestrator/scripts/panel-backup.sh

@@ -355,8 +355,10 @@ Located in `scripts/`, invoked by the API to act on the host:
 | `cleanup.sh` | Fully remove a site (files, nginx, DB, supervisor) |
 | `rename-domain.sh` | Rename a site's domain on disk + nginx |
 | `toggle-site.sh` | Enable/disable serving a site |
-| `backup.sh` | Cron-based MySQL dump backups |
+| `backup.sh` | Cron-based MySQL dump backups (per site) |
+| `panel-backup.sh` | Back up the panel's **own** SQLite database (WAL-safe) |
 | `orchestrator-api.service` · `nginx-panel.conf` | systemd & nginx templates |
+| `orchestrator-backup.service` · `.timer` | Daily panel-DB backup via systemd |
 
 ---
 

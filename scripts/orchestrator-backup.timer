@@ -1,0 +1,13 @@
+# Daily timer for the Orchestrator panel database backup.
+# See orchestrator-backup.service for install instructions.
+
+[Unit]
+Description=Daily Orchestrator panel database backup
+
+[Timer]
+# Every day at 03:30. Persistent=true runs a missed backup after downtime.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
