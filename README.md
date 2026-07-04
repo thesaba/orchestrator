@@ -101,6 +101,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🗂️ Full **file manager** (edit, upload, zip, chmod…)
 - 💻 In-browser **web terminal** (xterm.js)
 - 🚧 Maintenance mode & scheduled tasks (cron)
+- 🧰 **System control** — apt update/upgrade, cleanup, ufw firewall & reboot from the UI (admin)
 - ☁️ **S3 / R2** off-site backups
 
 ### 🔐 Security & Access
@@ -286,6 +287,14 @@ sudo certbot --nginx -d deploy.yourdomain.com
 - 🐬 add your MySQL root credentials (Settings) to enable database provisioning
 
 > ⚙️ Because Orchestrator runs privileged commands (`systemctl`, `nginx`, `certbot`, `mysql`…), the service user needs permission to run them. The simplest model runs the agent with elevated privileges; a hardened least-privilege setup with narrow `sudoers` rules is recommended for production.
+
+**System Control page (optional).** The admin-only **System** page runs package, cleanup, firewall and reboot actions via passwordless `sudo`. Grant them to the service user (e.g. `deployer`) in `/etc/sudoers.d/orchestrator-system`:
+
+```
+deployer ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/bin/journalctl, /usr/sbin/ufw, /sbin/reboot, /usr/sbin/reboot
+```
+
+Without this, System-page actions fail with "a password is required". Commands are a fixed allowlist and the page is admin-only, but review the security tradeoff before enabling.
 
 </details>
 

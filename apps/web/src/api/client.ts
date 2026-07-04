@@ -183,6 +183,11 @@ export const api = {
     processes: (limit = 8) =>
       request<ProcessStats>(`/monitor/processes?limit=${limit}`)
   },
+  system: {
+    info: () => request<SystemInfo>('/system/info')
+    // Streamed actions (/system/run/:key/stream) are consumed directly via
+    // ProvisionLog/consumeSSE with the built endpoint URL.
+  },
   dashboard: {
     get: () =>
       request<{ auto: string | null; presets: DashboardPreset[] }>('/dashboard'),
@@ -486,6 +491,16 @@ export interface DashboardPreset {
   name: string
   config: string
   updatedAt: string
+}
+
+export interface SystemInfo {
+  hostname: string
+  kernel: string
+  os: string
+  uptimeSeconds: number
+  pendingUpdates: number
+  rebootRequired: boolean
+  ufwStatus: 'active' | 'inactive' | null
 }
 
 export interface ServiceControlResult {

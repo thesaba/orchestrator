@@ -317,6 +317,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             { label: 'Settings',   icon: SettingsIcon,      url: '/settings' },
             ...(isAdmin ? [{ label: 'Team', icon: TeamIcon, url: '/team' }] : []),
             ...(isAdmin ? [{ label: 'Server', icon: GaugeIcon, url: '/server' }] : []),
+            ...(isAdmin ? [{ label: 'System', icon: WrenchIcon, url: '/system' }] : []),
           ]}
         />
 

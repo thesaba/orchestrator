@@ -22,6 +22,7 @@ const TasksPage      = lazy(() => named(import('./pages/TasksPage'), 'TasksPage'
 const NotesPage      = lazy(() => named(import('./pages/NotesPage'), 'NotesPage'))
 const CalendarPage   = lazy(() => named(import('./pages/CalendarPage'), 'CalendarPage'))
 const ServerPage     = lazy(() => named(import('./pages/ServerPage'), 'ServerPage'))
+const SystemPage     = lazy(() => named(import('./pages/SystemPage'), 'SystemPage'))
 
 function RouteFallback() {
   return (
@@ -66,6 +67,7 @@ function AppRoutes() {
                   <Route path="/settings"   element={<SettingsPage />} />
                   <Route path="/team"       element={<AdminRoute><TeamPage /></AdminRoute>} />
                   <Route path="/server"     element={<AdminRoute><ServerPage /></AdminRoute>} />
+                  <Route path="/system"     element={<AdminRoute><SystemPage /></AdminRoute>} />
                   <Route path="/tasks"      element={<TasksPage />} />
                   <Route path="/notes"      element={<NotesPage />} />
                   <Route path="/calendar"   element={<CalendarPage />} />
