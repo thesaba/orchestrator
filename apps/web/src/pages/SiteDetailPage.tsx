@@ -92,6 +92,12 @@ export function SiteDetailPage() {
   const [postDeploy, setPostDeploy] = useState('')
   const [healthCheck, setHealthCheck]         = useState(false)
   const [healthCheckUrl, setHealthCheckUrl]   = useState('')
+  // Deploy-time tests
+  const [runTests, setRunTests]               = useState(false)
+  const [testCommand, setTestCommand]         = useState('php artisan test')
+  const [testFailureMode, setTestFailureMode] = useState('block')
+  const [testTimeout, setTestTimeout]         = useState('300')
+  const [testUseSqlite, setTestUseSqlite]     = useState(true)
   const [savingRepo, setSavingRepo]           = useState(false)
 
   // Maintenance mode
@@ -167,6 +173,11 @@ export function SiteDetailPage() {
       setPostDeploy(s.postDeploy ?? '')
       setHealthCheck(s.healthCheck)
       setHealthCheckUrl(s.healthCheckUrl ?? '')
+      setRunTests(s.runTests ?? false)
+      setTestCommand(s.testCommand ?? 'php artisan test')
+      setTestFailureMode(s.testFailureMode ?? 'block')
+      setTestTimeout(String(s.testTimeout ?? 300))
+      setTestUseSqlite(s.testUseSqlite ?? true)
       setMaintenanceMode(s.maintenanceMode)
       setIdentityName(s.name)
       setIdentityDomain(s.domain)
@@ -223,7 +234,7 @@ export function SiteDetailPage() {
     } finally { setPhpSwitching(false) }
   }
 
-  const handleDeploy = async () => {
+  const handleDeploy = async (opts?: { skipTests?: boolean }) => {
     if (!site?.repoUrl) {
       setTab(TAB.SETTINGS)
       setDeployError('Set a repository URL in the Deploy Settings tab first.')
@@ -231,7 +242,7 @@ export function SiteDetailPage() {
     }
     setDeployError(''); setDeployResult(null)
     try {
-      const res = await api.deploy.trigger(siteId)
+      const res = await api.deploy.trigger(siteId, opts)
       if ('queued' in res) {
         setDeployResult('queued')
         showToast(res.message)
@@ -320,6 +331,11 @@ export function SiteDetailPage() {
         postDeploy,
         healthCheck,
         healthCheckUrl: healthCheckUrl || undefined,
+        runTests,
+        testCommand: testCommand || 'php artisan test',
+        testFailureMode,
+        testTimeout: Math.max(10, Math.min(3600, Number(testTimeout) || 300)),
+        testUseSqlite,
         ...(gitToken ? { gitToken } : {})
       })
       setGitToken('')
@@ -497,7 +513,7 @@ export function SiteDetailPage() {
       subtitle={site.name}
       backAction={{ content: 'Sites', onAction: () => navigate('/sites') }}
       primaryAction={
-        <Button variant="primary" onClick={handleDeploy} loading={deploying} disabled={site.status !== 'active'}>
+        <Button variant="primary" onClick={() => handleDeploy()} loading={deploying} disabled={site.status !== 'active'}>
           Deploy
         </Button>
       }
@@ -768,6 +784,64 @@ export function SiteDetailPage() {
 
                 <Divider />
 
+                {/* Deploy-time tests */}
+                <BlockStack gap="400">
+                  <Text as="h3" variant="headingSm">Tests (pre-deploy gate)</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Run your test suite on the new release before it goes live. In “block” mode a
+                    failing test aborts the deploy and the current release keeps serving traffic.
+                  </Text>
+                  <Checkbox
+                    label="Run tests during deploy"
+                    checked={runTests}
+                    onChange={setRunTests}
+                  />
+                  {runTests && (
+                    <BlockStack gap="300">
+                      <TextField
+                        label="Test command"
+                        value={testCommand}
+                        onChange={setTestCommand}
+                        autoComplete="off"
+                        placeholder="php artisan test"
+                        helpText="e.g. php artisan test · ./vendor/bin/pest · ./vendor/bin/phpunit --testsuite=Unit"
+                      />
+                      <InlineStack gap="400" blockAlign="start">
+                        <div style={{ minWidth: 220 }}>
+                          <Select
+                            label="On failure"
+                            options={[
+                              { label: 'Block deploy (recommended)', value: 'block' },
+                              { label: 'Warn only (deploy anyway)', value: 'warn' }
+                            ]}
+                            value={testFailureMode}
+                            onChange={setTestFailureMode}
+                          />
+                        </div>
+                        <div style={{ minWidth: 150 }}>
+                          <TextField
+                            label="Timeout (seconds)"
+                            type="number"
+                            value={testTimeout}
+                            onChange={setTestTimeout}
+                            autoComplete="off"
+                            min={10}
+                            max={3600}
+                          />
+                        </div>
+                      </InlineStack>
+                      <Checkbox
+                        label="Run against isolated in-memory SQLite (recommended)"
+                        checked={testUseSqlite}
+                        onChange={setTestUseSqlite}
+                        helpText="Forces APP_ENV=testing + SQLite :memory: so tests can never read or wipe your production database."
+                      />
+                    </BlockStack>
+                  )}
+                </BlockStack>
+
+                <Divider />
+
                 {/* Scheduler */}
                 <SchedulerSection siteId={siteId} />
 
@@ -832,10 +906,21 @@ export function SiteDetailPage() {
                 {/* Deploy Now */}
                 <BlockStack gap="300">
                   <Text as="h3" variant="headingSm">Manual Deploy</Text>
-                  <InlineStack>
-                    <Button variant="primary" size="large" onClick={handleDeploy} loading={deploying}
+                  <InlineStack gap="300">
+                    <Button variant="primary" size="large" onClick={() => handleDeploy()} loading={deploying}
                       disabled={site.status !== 'active' || !site.repoUrl}>Deploy Now</Button>
+                    {site.runTests && (
+                      <Button size="large" tone="critical" onClick={() => handleDeploy({ skipTests: true })}
+                        disabled={site.status !== 'active' || !site.repoUrl}>
+                        Deploy without tests
+                      </Button>
+                    )}
                   </InlineStack>
+                  {site.runTests && (
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Tests run automatically before this site goes live. “Deploy without tests” is a one-off emergency bypass.
+                    </Text>
+                  )}
                   {!site.repoUrl && <Text as="p" variant="bodySm" tone="caution">Set a repository URL above before deploying.</Text>}
                 </BlockStack>
 

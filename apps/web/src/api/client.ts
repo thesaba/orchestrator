@@ -50,6 +50,11 @@ export interface Site {
   postDeploy: string | null
   healthCheck: boolean
   healthCheckUrl: string | null
+  runTests: boolean
+  testCommand: string
+  testFailureMode: 'block' | 'warn'
+  testTimeout: number
+  testUseSqlite: boolean
   maintenanceMode: boolean
   uptimeMonitor: boolean
   pinned: boolean
@@ -71,6 +76,7 @@ export interface Deployment {
   status: 'pending' | 'running' | 'success' | 'failed'
   log: string | null
   comment?: string | null
+  testResult?: 'passed' | 'failed' | 'skipped' | null
   createdAt: string
 }
 
@@ -104,6 +110,7 @@ export const api = {
       repoUrl?: string; branch?: string; name?: string; domain?: string; disabled?: boolean
       renameOnDisk?: boolean; gitToken?: string
       preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
+      runTests?: boolean; testCommand?: string; testFailureMode?: string; testTimeout?: number; testUseSqlite?: boolean
       tags?: string[]; pinned?: boolean; notes?: string
     }) =>
       request<Site & { renameLog?: string }>(`/sites/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -125,9 +132,9 @@ export const api = {
       })
   },
   deploy: {
-    trigger: (siteId: number) =>
+    trigger: (siteId: number, opts?: { skipTests?: boolean }) =>
       request<{ started: boolean; deploymentId: number } | { queued: boolean; message: string }>(
-        `/sites/${siteId}/deploy`, { method: 'POST' }
+        `/sites/${siteId}/deploy${opts?.skipTests ? '?skipTests=1' : ''}`, { method: 'POST' }
       ),
     generateWebhookToken: (siteId: number) =>
       request<{ webhookToken: string }>(`/sites/${siteId}/webhook-token`, { method: 'POST' })

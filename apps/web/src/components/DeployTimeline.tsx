@@ -47,6 +47,15 @@ export function DeployTimeline({ deployments }: Props) {
                     d.status === 'failed'  ? 'critical' :
                     d.status === 'running' ? 'info' : 'warning'
                   }>{d.status}</Badge>
+                  {d.testResult && (
+                    <>
+                      {' '}
+                      <Badge tone={
+                        d.testResult === 'passed' ? 'success' :
+                        d.testResult === 'failed' ? 'critical' : 'warning'
+                      }>{`tests: ${d.testResult}`}</Badge>
+                    </>
+                  )}
                   {' '}
                   <Text as="span" variant="bodySm" fontWeight="semibold">
                     {d.branch}
