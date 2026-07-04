@@ -9,6 +9,7 @@ import crypto from 'crypto'
 import { notifyDeploy } from '../lib/notify'
 import { decryptSecret, encryptSecret } from '../lib/crypto'
 import { isValidGitUrl } from '../lib/exec'
+import { parseTestSummary } from '../lib/test-parse'
 
 const exec = promisify(execCb)
 
@@ -309,9 +310,19 @@ export async function runDeploy(
 
     const log = deployLogBuffers.get(deployment.id)!.join('')
 
+    // Extract test counts/duration from the runner summary when tests ran
+    // (best-effort; nulls if unparseable). testResult itself comes from the
+    // __TESTS__ marker / exit code and is always reliable.
+    const m = (testResult === 'passed' || testResult === 'failed')
+      ? parseTestSummary(log)
+      : { passed: null, failed: null, total: null, durationMs: null }
+
     await app.prisma.deployment.update({
       where: { id: deployment.id },
-      data: { status, log, commit: commitHash || null, testResult }
+      data: {
+        status, log, commit: commitHash || null, testResult,
+        testsPassed: m.passed, testsFailed: m.failed, testsTotal: m.total, testDurationMs: m.durationMs
+      }
     })
 
     app.audit(`deploy.${status}`, {
@@ -360,6 +371,43 @@ export async function runDeploy(
 export const deployRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
   app.addHook('preHandler', app.requireSiteAccess())
+
+  // GET /:id/test-stats — aggregated test analytics for a site's recent deploys.
+  app.get('/:id/test-stats', async (request) => {
+    const siteId = Number((request.params as { id: string }).id)
+
+    // Consider only deploys that actually ran tests (result passed/failed).
+    const runs = await app.prisma.deployment.findMany({
+      where: { siteId, testResult: { in: ['passed', 'failed'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      select: {
+        id: true, commit: true, testResult: true, createdAt: true,
+        testsPassed: true, testsFailed: true, testsTotal: true, testDurationMs: true
+      }
+    })
+
+    const passedCount = runs.filter((r) => r.testResult === 'passed').length
+    const durations = runs.map((r) => r.testDurationMs).filter((d): d is number => typeof d === 'number')
+    const avgDurationMs = durations.length
+      ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+      : null
+
+    return {
+      totalRuns: runs.length,
+      passRate: runs.length ? Math.round((passedCount / runs.length) * 100) : null,
+      avgDurationMs,
+      lastRun: runs[0] ?? null,
+      // Oldest → newest for charting.
+      trend: [...runs].reverse().map((r) => ({
+        date: r.createdAt,
+        result: r.testResult,
+        passed: r.testsPassed,
+        failed: r.testsFailed,
+        total: r.testsTotal
+      }))
+    }
+  })
 
   // POST /:id/deploy?skipTests=1 — trigger deploy (or queue if one is running).
   // skipTests is a one-off emergency override that bypasses the site's test gate

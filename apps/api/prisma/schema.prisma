@@ -148,6 +148,10 @@ model Deployment {
   log       String?
   comment   String?
   testResult String? // null = not run | "passed" | "failed" | "skipped"
+  testsPassed    Int?  // parsed from the test runner summary (best-effort)
+  testsFailed    Int?
+  testsTotal     Int?
+  testDurationMs Int?
   createdAt DateTime @default(now())
 }
 
