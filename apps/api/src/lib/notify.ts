@@ -64,17 +64,23 @@ interface DeployOpts {
   commit: string | null
   status: 'success' | 'failed'
   siteId: number
+  testResult?: string | null
 }
 
 export async function notifyDeploy(app: FastifyInstance, opts: DeployOpts): Promise<void> {
+  const fields = [
+    { label: 'Branch', value: opts.branch },
+    { label: 'Commit', value: opts.commit ?? '—' }
+  ]
+  if (opts.testResult) {
+    const icon = opts.testResult === 'passed' ? '✅' : opts.testResult === 'failed' ? '❌' : '⏭️'
+    fields.push({ label: 'Tests', value: `${icon} ${opts.testResult}` })
+  }
   await sendNotification(app, {
     title: opts.status === 'success' ? 'Deploy succeeded' : 'Deploy FAILED',
     subject: opts.domain,
     status: opts.status,
-    fields: [
-      { label: 'Branch', value: opts.branch },
-      { label: 'Commit', value: opts.commit ?? '—' }
-    ]
+    fields
   })
 }
 

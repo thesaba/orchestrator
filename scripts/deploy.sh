@@ -72,6 +72,63 @@ php${PHP_VER} "$(command -v composer)" install \
   --prefer-dist \
   --optimize-autoloader
 
+# ── 3b. PHP tests (optional gate) ─────────────────────────────────────────────
+# Runs ONLY when RUN_TESTS=1 (set per site in Deploy Settings). Executes before
+# migrations and the symlink swap, so a failing test never reaches the live
+# site — the previous release keeps serving. Existing sites don't set RUN_TESTS,
+# so this block is skipped entirely and their deploys are byte-for-byte unchanged.
+#
+# NOTE: --no-dev above omits PHPUnit/Pest. When tests are enabled we install dev
+# dependencies just for the test run (they're pruned from the release afterwards
+# so production autoloading is unaffected).
+if [ "${RUN_TESTS:-0}" = "1" ]; then
+  TEST_CMD="${TEST_COMMAND:-php artisan test}"
+  log "[3b/8] Tests enabled — installing dev dependencies..."
+  php${PHP_VER} "$(command -v composer)" install \
+    --no-interaction --prefer-dist --optimize-autoloader
+
+  log "[3b/8] Running tests: ${TEST_CMD}"
+
+  # Make the site's PHP the default `php` for the test run so both
+  # `php artisan test` and `./vendor/bin/pest|phpunit` use the configured
+  # version rather than whatever the system `php` resolves to.
+  TEST_BIN="$(mktemp -d)"
+  ln -sf "$(command -v php${PHP_VER})" "$TEST_BIN/php"
+
+  # By default force an isolated in-memory SQLite DB + APP_ENV=testing so tests
+  # can NEVER read or wipe the production database. Passed as real env vars
+  # scoped to the test process only — they do not leak into the prod migrate below.
+  TEST_ENV=(APP_ENV=testing)
+  if [ "${TEST_USE_SQLITE:-1}" = "1" ]; then
+    TEST_ENV+=(DB_CONNECTION=sqlite DB_DATABASE=:memory:)
+  fi
+
+  set +e
+  env "${TEST_ENV[@]}" PATH="$TEST_BIN:$PATH" \
+    timeout "${TEST_TIMEOUT:-300}" bash -c "cd '$RELEASE_DIR' && ${TEST_CMD}"
+  TEST_EXIT=$?
+  set -e
+  rm -rf "$TEST_BIN"
+
+  if [ "$TEST_EXIT" -eq 0 ]; then
+    log "  ✓ Tests passed."
+    echo "__TESTS__:passed"
+  else
+    echo "__TESTS__:failed"
+    if [ "${TEST_FAILURE_MODE:-block}" = "warn" ]; then
+      log "  ⚠ Tests FAILED (exit $TEST_EXIT) — continuing anyway (warn mode)."
+    else
+      log "  ✗ Tests FAILED (exit $TEST_EXIT) — aborting deploy. Live site unchanged."
+      exit 1
+    fi
+  fi
+
+  # Re-prune dev dependencies so the release matches a normal production install.
+  log "[3b/8] Pruning dev dependencies..."
+  php${PHP_VER} "$(command -v composer)" install \
+    --no-dev --no-interaction --prefer-dist --optimize-autoloader
+fi
+
 # ── 4. Front-end assets ──────────────────────────────────────────────────────
 if [ -f package.json ] && grep -q '"build"[[:space:]]*:' package.json; then
   log "[4/8] Installing JS dependencies and building front-end assets..."

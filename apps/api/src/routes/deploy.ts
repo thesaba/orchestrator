@@ -86,7 +86,8 @@ export async function reconcileOrphanedDeployments(app: FastifyInstance) {
         domain: site.domain,
         gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
         healthCheck: site.healthCheck,
-        healthCheckUrl: site.healthCheckUrl
+        healthCheckUrl: site.healthCheckUrl,
+        ...siteTestOpts(site)
       }).catch(() => {/* best effort */})
     }
   }
@@ -143,6 +144,27 @@ async function healthCheckSite(url: string, timeoutMs = 15_000): Promise<{ ok: b
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
 
+// Maps a site's persisted test configuration onto runDeploy opts. Kept as a
+// helper so every call site (manual, queued, webhook, redeploy) stays in sync
+// and existing sites — whose runTests defaults to false — deploy unchanged.
+// Param is intentionally `any`: it's always a Prisma Site row, and typing it
+// structurally would trip TS's weak-type check before `prisma generate` runs.
+export function siteTestOpts(site: any): {
+  runTests: boolean
+  testCommand?: string
+  testFailureMode?: string
+  testTimeout?: number
+  testUseSqlite?: boolean
+} {
+  return {
+    runTests: site.runTests ?? false,
+    testCommand: site.testCommand ?? undefined,
+    testFailureMode: site.testFailureMode ?? undefined,
+    testTimeout: site.testTimeout ?? undefined,
+    testUseSqlite: site.testUseSqlite ?? undefined
+  }
+}
+
 export async function runDeploy(
   app: FastifyInstance,
   siteId: number,
@@ -155,6 +177,12 @@ export async function runDeploy(
     gitToken?: string | null
     healthCheck?: boolean
     healthCheckUrl?: string | null
+    runTests?: boolean
+    testCommand?: string
+    testFailureMode?: string
+    testTimeout?: number
+    testUseSqlite?: boolean
+    skipTests?: boolean // one-off emergency override (bypasses runTests)
   }
 ): Promise<number> {
   if (deployEmitters.has(siteId)) {
@@ -174,20 +202,40 @@ export async function runDeploy(
   const sanitize = (line: string) =>
     opts.gitToken ? line.split(opts.gitToken).join('***') : line
 
+  // Tests run only when enabled for the site AND not overridden by a one-off
+  // "deploy without tests". These are passed via env (like REPO_URL) so they
+  // never appear in `ps`; when RUN_TESTS is absent/0 deploy.sh skips the whole
+  // test block, keeping existing sites' behaviour identical.
+  const testsEnabled = !!opts.runTests && !opts.skipTests
+  const testEnv: Record<string, string> = testsEnabled
+    ? {
+        RUN_TESTS: '1',
+        TEST_COMMAND: opts.testCommand || 'php artisan test',
+        TEST_FAILURE_MODE: opts.testFailureMode === 'warn' ? 'warn' : 'block',
+        TEST_TIMEOUT: String(opts.testTimeout && opts.testTimeout > 0 ? opts.testTimeout : 300),
+        TEST_USE_SQLITE: opts.testUseSqlite === false ? '0' : '1'
+      }
+    : {}
+
   const proc = spawn(
     'bash',
     [path.join(scriptsDir(), 'deploy.sh'), opts.rootPath, opts.branch, opts.phpVersion],
-    { env: { ...process.env, REPO_URL: authenticatedRepoUrl }, detached: true } // detached so we can kill the whole process group (git/composer/npm children), not just bash
+    { env: { ...process.env, REPO_URL: authenticatedRepoUrl, ...testEnv }, detached: true } // detached so we can kill the whole process group (git/composer/npm children), not just bash
   )
   deployProcs.set(siteId, proc)
 
   let commitHash = ''
+  // Test outcome reported by deploy.sh via a __TESTS__ marker. 'skipped' when a
+  // tests-enabled site was deployed with the emergency override.
+  let testResult: string | null = opts.runTests && opts.skipTests ? 'skipped' : null
   const addLine = (raw: string) => {
     const line = sanitize(raw)
     deployLogBuffers.get(deployment.id)!.push(line)
     emitter.emit('log', line)
     const m = line.match(/__COMMIT__:([a-f0-9]+)/)
     if (m) commitHash = m[1]
+    const t = line.match(/__TESTS__:(passed|failed)/)
+    if (t) testResult = t[1]
   }
 
   proc.stdout?.on('data', (c: Buffer) => addLine(c.toString()))
@@ -263,16 +311,19 @@ export async function runDeploy(
 
     await app.prisma.deployment.update({
       where: { id: deployment.id },
-      data: { status, log, commit: commitHash || null }
+      data: { status, log, commit: commitHash || null, testResult }
     })
 
     app.audit(`deploy.${status}`, {
       siteId,
-      meta: { domain: opts.domain, branch: opts.branch, commit: commitHash || null }
+      meta: { domain: opts.domain, branch: opts.branch, commit: commitHash || null, testResult }
     })
 
     if (opts.domain) {
-      notifyDeploy(app, { domain: opts.domain, branch: opts.branch, commit: commitHash || null, status, siteId })
+      notifyDeploy(app, {
+        domain: opts.domain, branch: opts.branch, commit: commitHash || null, status, siteId,
+        testResult
+      })
     }
 
     emitter.emit('done', status)
@@ -295,7 +346,8 @@ export async function runDeploy(
             domain: site.domain,
             gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
             healthCheck: site.healthCheck,
-            healthCheckUrl: site.healthCheckUrl
+            healthCheckUrl: site.healthCheckUrl,
+            ...siteTestOpts(site)
           })
         } catch { /* queued deploy failed to start — ignore */ }
       }, 2_000)
@@ -309,9 +361,12 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
   app.addHook('preHandler', app.requireSiteAccess())
 
-  // POST /:id/deploy — trigger deploy (or queue if one is running)
+  // POST /:id/deploy?skipTests=1 — trigger deploy (or queue if one is running).
+  // skipTests is a one-off emergency override that bypasses the site's test gate
+  // for this deploy only (e.g. urgent hotfix); the site setting is untouched.
   app.post('/:id/deploy', async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
+    const skipTests = (request.query as { skipTests?: string }).skipTests === '1'
 
     const site = await app.prisma.site.findUnique({ where: { id: siteId } })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
@@ -337,7 +392,9 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         domain: site.domain,
         gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
         healthCheck: site.healthCheck,
-        healthCheckUrl: site.healthCheckUrl
+        healthCheckUrl: site.healthCheckUrl,
+        ...siteTestOpts(site),
+        skipTests
       })
       return { started: true, deploymentId }
     } catch (err: unknown) {
@@ -452,6 +509,11 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
           postDeploy:    { type: 'string', maxLength: 4096 },
           healthCheck:   { type: 'boolean' },
           healthCheckUrl:{ type: 'string', maxLength: 500 },
+          runTests:        { type: 'boolean' },
+          testCommand:     { type: 'string', maxLength: 500 },
+          testFailureMode: { type: 'string', enum: ['block', 'warn'] },
+          testTimeout:     { type: 'integer', minimum: 10, maximum: 3600 },
+          testUseSqlite:   { type: 'boolean' },
           tags:          { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
           pinned:        { type: 'boolean' },
           notes:         { type: 'string', maxLength: 2000 }
@@ -463,12 +525,14 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     const siteId = Number((request.params as { id: string }).id)
     const {
       repoUrl, branch, name, domain, disabled, renameOnDisk,
-      gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl, tags, pinned, notes
+      gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl, tags, pinned, notes,
+      runTests, testCommand, testFailureMode, testTimeout, testUseSqlite
     } = request.body as {
       repoUrl?: string; branch?: string; name?: string; domain?: string; disabled?: boolean
       renameOnDisk?: boolean; gitToken?: string
       preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
       tags?: string[]; pinned?: boolean; notes?: string
+      runTests?: boolean; testCommand?: string; testFailureMode?: string; testTimeout?: number; testUseSqlite?: boolean
     }
 
     const existing = await app.prisma.site.findUnique({ where: { id: siteId } })
@@ -541,6 +605,11 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         ...(postDeploy    !== undefined && { postDeploy }),
         ...(healthCheck   !== undefined && { healthCheck }),
         ...(healthCheckUrl !== undefined && { healthCheckUrl }),
+        ...(runTests        !== undefined && { runTests }),
+        ...(testCommand     !== undefined && { testCommand }),
+        ...(testFailureMode !== undefined && { testFailureMode }),
+        ...(testTimeout     !== undefined && { testTimeout }),
+        ...(testUseSqlite   !== undefined && { testUseSqlite }),
         ...(tags          !== undefined && { tags: JSON.stringify(tags) }),
         ...(pinned        !== undefined && { pinned }),
         ...(notes         !== undefined && { notes })
@@ -650,7 +719,8 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         domain: site.domain,
         gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
         healthCheck: site.healthCheck,
-        healthCheckUrl: site.healthCheckUrl
+        healthCheckUrl: site.healthCheckUrl,
+        ...siteTestOpts(site)
       })
       return reply.code(202).send({ ok: true, deploymentId })
     } catch (err: unknown) {

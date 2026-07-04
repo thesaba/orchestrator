@@ -46,6 +46,12 @@ model Site {
   postDeploy      String?
   healthCheck     Boolean        @default(false)
   healthCheckUrl  String?
+  // ── Deploy-time PHP tests (all default off → existing sites are unaffected) ──
+  runTests        Boolean        @default(false)  // run tests before going live
+  testCommand     String         @default("php artisan test")
+  testFailureMode String         @default("block") // "block" (abort deploy) | "warn" (continue)
+  testTimeout     Int            @default(300)      // seconds
+  testUseSqlite   Boolean        @default(true)     // run against isolated in-memory SQLite (safe)
   deployQueued    Boolean        @default(false)
   maintenanceMode Boolean        @default(false)
   uptimeMonitor   Boolean        @default(true)
@@ -141,6 +147,7 @@ model Deployment {
   status    String   @default("pending")
   log       String?
   comment   String?
+  testResult String? // null = not run | "passed" | "failed" | "skipped"
   createdAt DateTime @default(now())
 }
 
