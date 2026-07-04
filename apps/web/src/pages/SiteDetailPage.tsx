@@ -23,7 +23,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ArtisanCommand, Deployment, Release, Site, maintenanceApi, logsApi, redeployApi } from '../api/client'
 import { phpVersionOptions } from '../utils/php'
 import { ProvisionLog }      from '../components/ProvisionLog'
-import { DeployReview }       from '../components/DeployReview'
+import { DeployReviewModal }  from '../components/DeployReview'
 import { ConfigEditor }      from '../components/ConfigEditor'
 import { WorkersTab }        from '../components/WorkersTab'
 import { SslTab }            from '../components/SslTab'
@@ -78,6 +78,7 @@ export function SiteDetailPage() {
   const [deploying, setDeploying]       = useState(false)
   const [deployError, setDeployError]   = useState('')
   const [deployResult, setDeployResult] = useState<'success' | 'failed' | 'queued' | null>(null)
+  const [reviewOpen, setReviewOpen]     = useState(false)
 
   // Releases / rollback
   const [releases, setReleases]           = useState<Release[]>([])
@@ -515,14 +516,12 @@ export function SiteDetailPage() {
       subtitle={site.name}
       backAction={{ content: 'Sites', onAction: () => navigate('/sites') }}
       primaryAction={
-        <InlineStack gap="200">
-          <DeployReview siteId={siteId} onDeploy={handleDeploy} disabled={deploying || site.status !== 'active'} />
-          <Button variant="primary" onClick={() => handleDeploy()} loading={deploying} disabled={site.status !== 'active'}>
-            Deploy
-          </Button>
-        </InlineStack>
+        <Button variant="primary" onClick={() => handleDeploy()} loading={deploying} disabled={site.status !== 'active'}>
+          Deploy
+        </Button>
       }
       secondaryActions={[
+        { content: 'Review changes', disabled: deploying || site.status !== 'active', onAction: () => setReviewOpen(true) },
         { content: site.sslEnabled ? '🔒 SSL' : 'SSL', onAction: () => setTab(TAB.SSL) },
         ...(isAdmin ? [{
           content: site.disabled ? 'Enable site' : 'Disable site',
@@ -534,6 +533,7 @@ export function SiteDetailPage() {
       ]}
     >
       <BlockStack gap="500">
+        <DeployReviewModal open={reviewOpen} onClose={() => setReviewOpen(false)} siteId={siteId} onDeploy={handleDeploy} />
 
         {/* ── Breadcrumb ────────────────────────────────────────────────── */}
         <Breadcrumb items={[{ label: 'Sites', url: '/sites' }, { label: site.domain }]} />
