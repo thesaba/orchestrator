@@ -202,6 +202,20 @@ export const api = {
     remove: (id: number) => request<{ ok: true }>(`/notifications/${id}`, { method: 'DELETE' }),
     clear: () => request<{ ok: true }>('/notifications', { method: 'DELETE' })
   },
+  logErrors: {
+    list: (params?: { siteId?: number; search?: string; resolved?: '0' | '1' }) => {
+      const p = new URLSearchParams()
+      if (params?.siteId) p.set('siteId', String(params.siteId))
+      if (params?.search) p.set('search', params.search)
+      if (params?.resolved) p.set('resolved', params.resolved)
+      const qs = p.toString()
+      return request<{ errors: LogErrorItem[]; unresolved: number }>(`/log-errors${qs ? `?${qs}` : ''}`)
+    },
+    get: (id: number) => request<LogErrorDetail>(`/log-errors/${id}`),
+    setResolved: (id: number, resolved: boolean) =>
+      request<LogErrorItem>(`/log-errors/${id}`, { method: 'PATCH', body: JSON.stringify({ resolved }) }),
+    remove: (id: number) => request<{ ok: true }>(`/log-errors/${id}`, { method: 'DELETE' })
+  },
   alerts: {
     list: () => request<{ rules: AlertRule[] }>('/alerts'),
     create: (data: { metric: string; operator?: string; threshold: number; cooldownMins?: number }) =>
@@ -571,6 +585,34 @@ export interface AlertRule {
   cooldownMins: number
   lastTriggeredAt: string | null
   createdAt: string
+}
+
+export interface LogErrorItem {
+  id: number
+  siteId: number
+  level: string
+  exceptionClass: string | null
+  message: string
+  count: number
+  firstSeenAt: string
+  lastSeenAt: string
+  resolved: boolean
+  site: { domain: string }
+}
+
+export interface LogErrorDetail {
+  id: number
+  siteId: number
+  level: string
+  exceptionClass: string | null
+  message: string
+  sample: string | null
+  count: number
+  firstSeenAt: string
+  lastSeenAt: string
+  resolved: boolean
+  site: { id: number; domain: string }
+  introducedBy: { id: number; branch: string; commit: string | null; createdAt: string } | null
 }
 
 export interface EnvVersionMeta {

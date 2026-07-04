@@ -103,6 +103,30 @@ model Site {
   noteEntries     Note[]
   calendarEvents  CalendarEvent[]
   envVersions     EnvVersion[]
+  logErrors       LogError[]
+}
+
+// A grouped application error mined from a site's Laravel log (mini-Sentry).
+// Occurrences are collapsed by a fingerprint (exception class + normalized
+// message) so the same error counts up rather than flooding the list.
+model LogError {
+  id             Int      @id @default(autoincrement())
+  siteId         Int
+  site           Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  fingerprint    String
+  level          String   // error | critical | emergency | alert | warning
+  exceptionClass String?
+  message        String
+  sample         String?  // the raw header line, for context
+  count          Int      @default(1)
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  resolved       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@unique([siteId, fingerprint])
+  @@index([siteId, lastSeenAt])
+  @@index([resolved, lastSeenAt])
 }
 
 // In-app notification feed (deploy results, threshold alerts, SSL, …). Global

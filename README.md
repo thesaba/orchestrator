@@ -77,6 +77,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🧪 Built-in SQL runner (read/DML, DDL blocked)
 
 ### 📊 Monitoring
+- 🐞 **Log Intelligence (mini-Sentry)** — Laravel errors mined & grouped by type with counts, first/last seen, search & resolve, linked to the deploy that likely introduced them
 - 🔔 **Notification center + threshold alerts** — bell feed for deploys & alerts; raise CPU/RAM/disk/swap rules that fan out to your channels
 - 🎛️ **Customizable dashboard** — drag to reorder, resize, show/hide widgets & save per-user presets
 - 📈 CPU, RAM, disk & swap in real time

@@ -315,6 +315,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             { label: 'Dashboard',  icon: HomeIcon,          url: '/',           exactMatch: true },
             { label: 'Sites',      icon: GlobeIcon,         url: '/sites' },
             { label: 'Monitoring', icon: ChartVerticalIcon, url: '/monitoring' },
+            ...(isAdmin ? [{ label: 'Errors', icon: BugIcon, url: '/errors' }] : []),
             { label: 'Settings',   icon: SettingsIcon,      url: '/settings' },
             ...(isAdmin ? [{ label: 'Team', icon: TeamIcon, url: '/team' }] : []),
             ...(isAdmin ? [{ label: 'Server', icon: GaugeIcon, url: '/server' }] : []),
