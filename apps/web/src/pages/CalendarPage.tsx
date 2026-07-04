@@ -14,7 +14,26 @@ const TYPE_COLOR: Record<string, string> = {
   task_deadline: '#d72c0d'
 }
 
-function fmtDate(d: Date) {
+// Local calendar date (Y-M-D from the viewer's local components). The month
+// grid cells and "today" are built as local-midnight Dates, so they must be
+// keyed by their LOCAL date.
+function fmtLocal(d: Date) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+// UTC calendar date. All-day events and task due dates are stored at UTC
+// midnight, so their intended calendar day is the UTC Y-M-D — key them this way
+// so they land on the matching grid cell regardless of the viewer's timezone.
+//
+// Previously a single helper used toISOString() (UTC) for BOTH the grid days
+// (which are local-midnight Dates) and the events. In UTC+ timezones a local
+// midnight converts back to the previous UTC day, so every grid cell was keyed
+// one day early and events appeared one cell too late — the "date lands on the
+// next day" bug. Splitting local vs UTC keying fixes it.
+function fmtUTC(d: Date) {
   return d.toISOString().slice(0, 10)
 }
 
@@ -95,7 +114,7 @@ export function CalendarPage() {
   const eventsByDay = useMemo(() => {
     const map: Record<string, CalendarEvent[]> = {}
     for (const e of events) {
-      const key = fmtDate(new Date(e.startAt))
+      const key = fmtUTC(new Date(e.startAt))
       if (!map[key]) map[key] = []
       map[key].push(e)
     }
@@ -108,7 +127,7 @@ export function CalendarPage() {
     setFormTitle('')
     setFormDescription('')
     setFormType('custom')
-    setFormDate(fmtDate(date))
+    setFormDate(fmtLocal(date))
     setFormAllDay(true)
     setFormRecurrence('')
     setFormSiteId('')
@@ -123,7 +142,7 @@ export function CalendarPage() {
     setFormTitle(ev.title)
     setFormDescription(ev.description ?? '')
     setFormType(ev.type)
-    setFormDate(fmtDate(new Date(ev.startAt)))
+    setFormDate(fmtUTC(new Date(ev.startAt)))
     setFormAllDay(ev.allDay)
     setFormRecurrence(ev.recurrence ?? '')
     setFormSiteId(ev.siteId ? String(ev.siteId) : '')
@@ -182,7 +201,7 @@ export function CalendarPage() {
     setFormAttendees(a => a.includes(id) ? a.filter(x => x !== id) : [...a, id])
 
   const monthLabel = anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-  const todayKey = fmtDate(new Date())
+  const todayKey = fmtLocal(new Date())
 
   return (
     <Page
@@ -213,7 +232,7 @@ export function CalendarPage() {
                 </div>
               ))}
               {days.map(day => {
-                const key = fmtDate(day)
+                const key = fmtLocal(day)
                 const inMonth = day.getMonth() === anchor.getMonth()
                 const dayEvents = eventsByDay[key] ?? []
                 return (

@@ -283,8 +283,8 @@ export function TasksPage() {
                                 <InlineStack gap="150" wrap>
                                   <Badge tone={PRIORITY_TONE[task.priority]}>{task.priority}</Badge>
                                   {task.dueDate && (
-                                    <Badge tone={new Date(task.dueDate) < new Date() && task.status !== 'done' ? 'critical' : undefined}>
-                                      {new Date(task.dueDate).toLocaleDateString()}
+                                    <Badge tone={task.dueDate.slice(0, 10) < new Date().toISOString().slice(0, 10) && task.status !== 'done' ? 'critical' : undefined}>
+                                      {new Date(task.dueDate).toLocaleDateString(undefined, { timeZone: 'UTC' })}
                                     </Badge>
                                   )}
                                   {task.checklist.length > 0 && <Badge>{`${doneCount}/${task.checklist.length}`}</Badge>}
