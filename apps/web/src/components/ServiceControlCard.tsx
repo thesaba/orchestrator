@@ -3,6 +3,7 @@ import { RefreshIcon } from '@shopify/polaris-icons'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ServiceStatus } from '../api/client'
 import { consumeSSE } from '../utils/sse'
+import { LogConsole } from './LogConsole'
 
 interface Props {
   services: ServiceStatus[]
@@ -31,7 +32,6 @@ function ServiceRow({ svc, onRefresh }: { svc: ServiceStatus; onRefresh: () => v
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
   const [showLogs, setShowLogs] = useState(false)
   const [logLines, setLogLines] = useState<string[]>([])
-  const logBottomRef = useRef<HTMLDivElement>(null)
   const sseAbortRef = useRef<AbortController | null>(null)
 
   const handleControl = useCallback(async (action: Action) => {
@@ -64,10 +64,6 @@ function ServiceRow({ svc, onRefresh }: { svc: ServiceStatus; onRefresh: () => v
     ).catch(() => {})
     return () => ctrl.abort()
   }, [showLogs, svc.key])
-
-  useEffect(() => {
-    logBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logLines])
 
   const isActive = svc.status === 'active'
 
@@ -147,26 +143,12 @@ function ServiceRow({ svc, onRefresh }: { svc: ServiceStatus; onRefresh: () => v
       )}
 
       {showLogs && (
-        <div
-          style={{
-            background: '#0d1117',
-            border: '1px solid #21262d',
-            borderRadius: 6,
-            height: 160,
-            overflowY: 'auto',
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            fontSize: 11,
-            lineHeight: 1.6,
-            padding: '8px 12px',
-            color: '#e6edf3'
-          }}
-        >
-          {logLines.length === 0 && (
-            <span style={{ color: '#8b949e' }}>Connecting to journalctl -u {svc.key}…</span>
-          )}
-          {logLines.map((line, i) => <div key={i}>{line}</div>)}
-          <div ref={logBottomRef} />
-        </div>
+        <LogConsole
+          lines={logLines}
+          minHeight={160}
+          maxHeight={160}
+          emptyText={`Connecting to journalctl -u ${svc.key}…`}
+        />
       )}
     </BlockStack>
   )

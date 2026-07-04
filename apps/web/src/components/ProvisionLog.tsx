@@ -1,6 +1,7 @@
 import { Banner, BlockStack, InlineStack, ProgressBar, Text } from '@shopify/polaris'
 import { useEffect, useRef, useState } from 'react'
 import { consumeSSE } from '../utils/sse'
+import { LogConsole } from './LogConsole'
 
 type RunStatus = 'running' | 'success' | 'error'
 
@@ -30,13 +31,7 @@ export function ProvisionLog({ endpoint, onComplete }: Props) {
   const [lines, setLines]       = useState<string[]>([])
   const [runStatus, setRunStatus] = useState<RunStatus>('running')
   const [step, setStep]         = useState<StepInfo | null>(null)
-  const terminalRef = useRef<HTMLDivElement>(null)
   const abortRef  = useRef<AbortController | null>(null)
-  // Whether the user is (still) scrolled to the bottom of the log. Drives
-  // "stick to tail" auto-scroll — but only within the log box itself, never
-  // the page around it, and never while the user has scrolled up to read
-  // earlier output.
-  const stickToBottomRef = useRef(true)
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -67,22 +62,6 @@ export function ProvisionLog({ endpoint, onComplete }: Props) {
     return () => ctrl.abort()
   }, [endpoint, onComplete])
 
-  useEffect(() => {
-    const el = terminalRef.current
-    if (!el || !stickToBottomRef.current) return
-    // Scroll only this box's own scroll container — not scrollIntoView,
-    // which walks up every scrollable ancestor (including the page itself)
-    // and was dragging the whole panel down on every new log line.
-    el.scrollTop = el.scrollHeight
-  }, [lines])
-
-  const handleTerminalScroll = () => {
-    const el = terminalRef.current
-    if (!el) return
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    stickToBottomRef.current = distanceFromBottom < 40
-  }
-
   const progress = step ? Math.round((step.current / step.total) * 100) : 0
 
   return (
@@ -107,23 +86,8 @@ export function ProvisionLog({ endpoint, onComplete }: Props) {
         </BlockStack>
       )}
 
-      <div
-        ref={terminalRef}
-        onScroll={handleTerminalScroll}
-        className="oc-terminal"
-        style={{
-          fontSize: '12.5px',
-          lineHeight: '1.6',
-          minHeight: '200px',
-          maxHeight: '440px',
-          wordBreak: 'break-all'
-        }}
-      >
-        {lines.join('')}
-        {runStatus === 'running' && (
-          <span style={{ opacity: 0.6, animation: 'blink 1s step-end infinite' }}>▋</span>
-        )}
-      </div>
+      <LogConsole lines={lines} running={runStatus === 'running'} minHeight={200} maxHeight={440} />
+
 
       {runStatus !== 'running' && (
         <Banner tone={runStatus === 'success' ? 'success' : 'critical'}>

@@ -2,27 +2,7 @@ import { BlockStack, Select, TextField, Text, Badge, InlineStack, Button } from 
 import { useEffect, useRef, useState } from 'react'
 import { Site } from '../api/client'
 import { consumeSSE } from '../utils/sse'
-
-const LOG_LEVEL_STYLES: Record<string, React.CSSProperties> = {
-  error:   { color: '#ff6b6b', fontWeight: 'bold' },
-  critical:{ color: '#ff4444', fontWeight: 'bold' },
-  warning: { color: '#ffd93d' },
-  alert:   { color: '#ffa500' },
-  debug:   { color: '#6b8aaa' },
-  info:    { color: '#98c379' },
-  default: { color: '#e6edf3' }
-}
-
-function detectLevel(line: string): keyof typeof LOG_LEVEL_STYLES {
-  const upper = line.toUpperCase()
-  if (upper.includes('.CRITICAL') || upper.includes('CRITICAL:')) return 'critical'
-  if (upper.includes('.ERROR') || upper.includes('ERROR:') || upper.includes('EXCEPTION') || upper.includes('SQLSTATE')) return 'error'
-  if (upper.includes('.ALERT')) return 'alert'
-  if (upper.includes('.WARNING')) return 'warning'
-  if (upper.includes('.DEBUG')) return 'debug'
-  if (upper.includes('.INFO')) return 'info'
-  return 'default'
-}
+import { LogConsole } from './LogConsole'
 
 interface Props {
   sites: Site[]
@@ -34,7 +14,6 @@ export function LogTailViewer({ sites }: Props) {
   const [paused, setPaused] = useState(false)
   const [lines, setLines] = useState<string[]>([])
   const [connected, setConnected] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
   const pausedRef = useRef(paused)
   pausedRef.current = paused
 
@@ -61,11 +40,6 @@ export function LogTailViewer({ sites }: Props) {
 
     return () => ctrl.abort()
   }, [siteId])
-
-  // Auto-scroll unless paused
-  useEffect(() => {
-    if (!paused) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [lines, paused])
 
   const displayLines = filter
     ? lines.filter((l) => l.toLowerCase().includes(filter.toLowerCase()))
@@ -110,36 +84,16 @@ export function LogTailViewer({ sites }: Props) {
       </div>
 
       {siteId && (
-        <div
-          className="oc-terminal"
-          style={{ height: '480px', lineHeight: '1.7', overflowY: 'auto' }}
-        >
-          {!connected && (
-            <Text as="p" tone="subdued">
-              Connecting to {sites.find((s) => String(s.id) === siteId)?.domain} log…
-            </Text>
-          )}
-          {displayLines.map((line, i) => {
-            const level = detectLevel(line)
-            return (
-              <div key={i} style={LOG_LEVEL_STYLES[level]}>
-                {line}
-              </div>
-            )
-          })}
-          {!paused && <div ref={bottomRef} />}
-        </div>
+        <LogConsole
+          lines={displayLines}
+          minHeight={480}
+          maxHeight={480}
+          emptyText={!connected ? `Connecting to ${sites.find((s) => String(s.id) === siteId)?.domain} log…` : undefined}
+        />
       )}
 
       {!siteId && (
-        <div
-          className="oc-terminal"
-          style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Text as="p" tone="subdued">
-            Select an active site to start tailing its Laravel log
-          </Text>
-        </div>
+        <LogConsole lines={[]} minHeight={200} maxHeight={200} emptyText="Select an active site to start tailing its Laravel log" />
       )}
 
       {siteId && (

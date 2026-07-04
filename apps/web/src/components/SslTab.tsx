@@ -11,6 +11,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { api, SslStatus } from '../api/client'
 import { consumeSSE } from '../utils/sse'
+import { LogConsole } from './LogConsole'
 
 interface Props {
   siteId: number
@@ -25,7 +26,6 @@ export function SslTab({ siteId }: Props) {
   const [logs, setLogs]       = useState<string[]>([])
   const [error, setError]     = useState('')
   const abortRef              = useRef<AbortController | null>(null)
-  const logsEndRef            = useRef<HTMLDivElement>(null)
 
   const loadStatus = () => {
     setLoading(true)
@@ -36,10 +36,6 @@ export function SslTab({ siteId }: Props) {
   }
 
   useEffect(() => { loadStatus() }, [siteId]) // eslint-disable-line
-
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
 
   const startOp = async (kind: Op) => {
     setError('')
@@ -185,15 +181,7 @@ export function SslTab({ siteId }: Props) {
 
       {/* ── Certbot output terminal ───────────────────────── */}
       {logs.length > 0 && (
-        <div
-          className="oc-terminal"
-          style={{ lineHeight: 1.5, maxHeight: 360, wordBreak: 'break-all' }}
-        >
-          {logs.map((line, i) => (
-            <div key={i}>{line}</div>
-          ))}
-          <div ref={logsEndRef} />
-        </div>
+        <LogConsole lines={logs} minHeight={120} maxHeight={360} />
       )}
     </BlockStack>
   )
