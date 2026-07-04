@@ -26,6 +26,22 @@ model User {
   noteShares        NoteShare[]
   calendarEvents    CalendarEvent[]
   calendarAttending CalendarEventAttendee[]
+  dashboardPresets  DashboardPreset[]
+}
+
+// Per-user monitoring dashboard layout. `name` "__auto__" holds the live
+// working layout (auto-saved on every change); any other name is a user-saved
+// preset. `config` is a JSON string: an ordered array of { id, width, visible }.
+model DashboardPreset {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  config    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
 }
 
 model Site {

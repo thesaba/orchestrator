@@ -183,6 +183,16 @@ export const api = {
     processes: (limit = 8) =>
       request<ProcessStats>(`/monitor/processes?limit=${limit}`)
   },
+  dashboard: {
+    get: () =>
+      request<{ auto: string | null; presets: DashboardPreset[] }>('/dashboard'),
+    saveAuto: (config: string) =>
+      request<{ ok: true }>('/dashboard/auto', { method: 'PUT', body: JSON.stringify({ config }) }),
+    savePreset: (name: string, config: string) =>
+      request<DashboardPreset>('/dashboard/presets', { method: 'POST', body: JSON.stringify({ name, config }) }),
+    deletePreset: (id: number) =>
+      request<{ ok: true }>(`/dashboard/presets/${id}`, { method: 'DELETE' })
+  },
   server: {
     status: () => request<ServerStatus>('/server/status'),
     listDroplets: () => request<DODroplet[]>('/server/droplets'),
@@ -469,6 +479,13 @@ export interface ProcessStats {
   cores: number
   services: ProcessService[]
   capturedAt: string
+}
+
+export interface DashboardPreset {
+  id: number
+  name: string
+  config: string
+  updatedAt: string
 }
 
 export interface ServiceControlResult {
