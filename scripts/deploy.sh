@@ -54,6 +54,11 @@ rm -rf storage
 ln -sf "$SHARED_DIR/storage" storage
 ln -sf "$SHARED_DIR/.env" .env
 
+# Laravel needs bootstrap/cache to exist and be writable before composer runs
+# its post-install `package:discover`. Some repos don't commit this directory.
+mkdir -p bootstrap/cache
+chmod -R ug+rwX bootstrap/cache
+
 # ── 3. Composer ──────────────────────────────────────────────────────────────
 # Run composer through the site's configured PHP binary explicitly — the bare
 # `composer` command uses whatever `php` resolves to on PATH (the system
@@ -102,6 +107,30 @@ php${PHP_VER} artisan view:cache
 # ── 6. Migrations ────────────────────────────────────────────────────────────
 log "[6/8] Running migrations..."
 php${PHP_VER} artisan migrate --force
+
+# ── 6b. Hand the release to the web/worker user ──────────────────────────────
+# The Supervisor queue worker runs as www-data and must be able to write
+# bootstrap/cache (compiled package manifest) and storage. The release was
+# created by the deploy user, so transfer ownership now — otherwise the worker
+# fails with "bootstrap/cache must be present and writable".
+#
+# Best-effort and NON-FATAL: a permission failure only logs a warning and never
+# aborts an otherwise-successful build (matching the previous behaviour).
+WEB_USER="www-data"
+log "[6b/8] Setting web-server ownership ($WEB_USER)..."
+if [ "$(id -u)" = "0" ]; then
+  chown -R "$WEB_USER:$WEB_USER" "$RELEASE_DIR" || log "  WARN: chown failed (continuing)"
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  sudo chown -R "$WEB_USER:$WEB_USER" "$RELEASE_DIR" || log "  WARN: sudo chown failed (continuing)"
+else
+  # Not root and no passwordless sudo — fall back to group access (works when the
+  # deploy user belongs to the www-data group). Never fatal.
+  chgrp -R "$WEB_USER" bootstrap/cache storage 2>/dev/null || true
+  chmod -R g+rwX bootstrap/cache 2>/dev/null || true
+  log "  NOTE: not root and no passwordless sudo — applied group-based fallback."
+  log "        If the worker still can't write bootstrap/cache, run once:"
+  log "        sudo chown -R $WEB_USER:$WEB_USER $RELEASE_DIR"
+fi
 
 # ── 7. Atomic symlink swap ───────────────────────────────────────────────────
 log "[7/8] Activating release (symlink swap)..."

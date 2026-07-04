@@ -353,7 +353,7 @@ Located in `scripts/`, invoked by the API to act on the host:
 | Script | Purpose |
 |--------|---------|
 | `provision.sh` | Create site dir, MySQL database/user, nginx vhost |
-| `deploy.sh` | Zero-downtime deploy (clone → composer → build → migrate → symlink swap) |
+| `deploy.sh` | Zero-downtime deploy (clone → composer → build → migrate → hand ownership to `www-data` → symlink swap) |
 | `ssl.sh` | Issue a Let's Encrypt certificate via Certbot |
 | `cleanup.sh` | Fully remove a site (files, nginx, DB, supervisor) |
 | `rename-domain.sh` | Rename a site's domain on disk + nginx |
