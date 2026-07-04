@@ -67,7 +67,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🩺 Post-deploy **health checks** with **auto-rollback**
 - 🧩 Custom **pre / post-deploy hooks**
 - 📜 Live streaming deploy logs (SSE)
-- 🔔 **Notifications** on deploy events — Slack, Discord, Telegram, email & generic webhook
+- 🔔 **Rich deploy notifications** — Slack, Discord, Telegram, email & webhook, with commit message, author, duration & test counts
 
 ### 🗄️ Databases
 - ➕ Create & manage MySQL databases/users per site
@@ -77,8 +77,10 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🧪 Built-in SQL runner (read/DML, DDL blocked)
 
 ### 📊 Monitoring
+- 🎛️ **Customizable dashboard** — drag to reorder, resize, show/hide widgets & save per-user presets
 - 📈 CPU, RAM, disk & swap in real time
 - 📉 **Historical resource charts** (6h / 24h / 7d)
+- 🔥 **Top services by resource use** — processes grouped & ranked by CPU / memory
 - 🟢 Service status (nginx, MySQL, Redis, PHP-FPM…)
 - ⏱️ **Uptime monitoring** with history
 - 🧾 Live log viewer & failed-jobs inspector
