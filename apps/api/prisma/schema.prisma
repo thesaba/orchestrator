@@ -29,6 +29,24 @@ model User {
   dashboardPresets  DashboardPreset[]
   accessTokens      PersonalAccessToken[]
   envVersions       EnvVersion[]
+  telegramLink      TelegramLink?
+}
+
+// Links a panel user to their Telegram account so the bot can act on their
+// behalf with their exact role/site permissions. `linkCode` is a one-time,
+// short-lived code generated in the panel; once the user sends it to the bot,
+// telegramUserId/chatId are filled in and the code is cleared.
+model TelegramLink {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  telegramUserId  String?   @unique
+  chatId          String?
+  username        String?
+  linkCode        String?   @unique
+  linkCodeExpires DateTime?
+  linkedAt        DateTime?
+  createdAt       DateTime  @default(now())
 }
 
 // Personal Access Token for scripting the panel API (CI, curl). Only a SHA-256

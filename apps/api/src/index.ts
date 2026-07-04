@@ -45,6 +45,7 @@ import { tokensRoutes } from './routes/tokens'
 import { notificationsRoutes } from './routes/notifications'
 import { alertsRoutes } from './routes/alerts'
 import { logErrorsRoutes } from './routes/log-errors'
+import { telegramRoutes } from './routes/telegram'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 import { startAlertsMonitor } from './lib/alerts-monitor'
 import { startLogCollector } from './lib/log-collector'
@@ -127,6 +128,7 @@ async function start() {
   await app.register(notificationsRoutes, { prefix: '/api/notifications' })
   await app.register(alertsRoutes,      { prefix: '/api/alerts' })
   await app.register(logErrorsRoutes,   { prefix: '/api/log-errors' })
+  await app.register(telegramRoutes,    { prefix: '/api/telegram' })
 
   // Loopback-only, shared-secret-protected — used by the phpMyAdmin signon
   // bridge to redeem a one-time token for real DB credentials. See
