@@ -227,6 +227,13 @@ export const api = {
       request<AlertRule>(`/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     remove: (id: number) => request<{ ok: true }>(`/alerts/${id}`, { method: 'DELETE' })
   },
+  telegram: {
+    me: () => request<TelegramStatus>('/telegram/me'),
+    linkCode: () => request<{ code: string; botUsername: string; deepLink: string | null; expiresAt: string }>('/telegram/link-code', { method: 'POST' }),
+    unlink: () => request<{ ok: true }>('/telegram/unlink', { method: 'POST' }),
+    setup: () => request<{ ok: boolean; url: string }>('/telegram/setup', { method: 'POST' }),
+    removeWebhook: () => request<{ ok: true }>('/telegram/remove-webhook', { method: 'POST' })
+  },
   tokens: {
     list: () => request<{ tokens: AccessToken[] }>('/tokens'),
     create: (name: string, expiresInDays?: number) =>
@@ -566,6 +573,15 @@ export interface AccessToken {
   lastUsedAt: string | null
   expiresAt: string | null
   createdAt: string
+}
+
+export interface TelegramStatus {
+  linked: boolean
+  username: string | null
+  linkedAt: string | null
+  botConfigured: boolean
+  botUsername: string
+  webhookConfigured: boolean
 }
 
 export interface AppNotification {

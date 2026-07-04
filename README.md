@@ -115,6 +115,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🔑 **Personal Access Tokens** — scriptable panel API for CI/curl (hashed, scoped to your role, revocable)
 
 ### 🧠 Productivity
+- 📱 **Interactive Telegram bot** — manage sites, deploys, rollbacks & tasks from chat, with your own role/site permissions
 - 🔎 **Search, sort & tag-filter** across your sites
 - 🗂️ Kanban **task board** · 📝 Notes · 📅 Calendar
 - 🌊 **DigitalOcean** droplet controls

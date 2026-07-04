@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, PanelSettings, s3Api, DODroplet, AccessToken } from '../api/client'
 import { useToast } from '../context/toast'
 import { useAuth } from '../context/AuthContext'
+import { TelegramCard } from '../components/TelegramCard'
 
 const EMPTY: PanelSettings = {
   panel_title: '',
@@ -377,6 +378,10 @@ export function SettingsPage() {
 
   const integrationsTab = (
     <Layout>
+      <Layout.Section>
+        <TelegramCard />
+      </Layout.Section>
+
       <Layout.Section>
         <Card>
           <BlockStack gap="400">
