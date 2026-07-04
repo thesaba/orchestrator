@@ -2,6 +2,15 @@ import { useEffect, useState, useMemo } from 'react'
 import { Text } from '@shopify/polaris'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useToast } from '../context/toast'
+import { useAuth } from '../context/AuthContext'
+
+const SERVICES = [
+  { key: 'nginx',   name: 'Nginx' },
+  { key: 'php-fpm', name: 'PHP-FPM' },
+  { key: 'mysql',   name: 'MySQL' },
+  { key: 'redis',   name: 'Redis' }
+]
 
 interface Action {
   id: string
@@ -21,6 +30,17 @@ export function CommandPalette({ open, onClose }: Props) {
   const [sites,   setSites]   = useState<{ id: number; domain: string; name: string }[]>([])
   const [active,  setActive]  = useState(0)
   const navigate = useNavigate()
+  const showToast = useToast()
+  const { isAdmin } = useAuth()
+
+  // Wrap an async action so it toasts success/failure and never throws into the
+  // key handler. Fired-and-forgotten (the palette closes immediately).
+  const runAction = (label: string, fn: () => Promise<unknown>) => () => {
+    Promise.resolve()
+      .then(fn)
+      .then(() => showToast(`${label} ✓`))
+      .catch((e) => showToast(e instanceof Error ? e.message : `${label} failed`, { error: true }))
+  }
 
   useEffect(() => {
     if (open) {
@@ -30,33 +50,58 @@ export function CommandPalette({ open, onClose }: Props) {
     }
   }, [open])
 
-  const staticActions: Action[] = useMemo(() => [
-    { id: 'dash',       label: 'Dashboard',         icon: '🏠', onSelect: () => navigate('/') },
-    { id: 'sites',      label: 'Sites',              icon: '🌐', onSelect: () => navigate('/sites') },
-    { id: 'monitoring', label: 'Monitoring',         icon: '📊', onSelect: () => navigate('/monitoring') },
-    { id: 'settings',   label: 'Settings',           icon: '⚙️', onSelect: () => navigate('/settings') },
-    { id: 'new-site',   label: 'New Site',           subtitle: 'Create a new site', icon: '➕', onSelect: () => navigate('/sites/new') }
-  ], [navigate])
+  // Navigation + global service actions (always shown).
+  const baseActions: Action[] = useMemo(() => [
+    { id: 'dash',       label: 'Dashboard',  icon: '🏠', onSelect: () => navigate('/') },
+    { id: 'sites',      label: 'Sites',       icon: '🌐', onSelect: () => navigate('/sites') },
+    { id: 'monitoring', label: 'Monitoring',  icon: '📊', onSelect: () => navigate('/monitoring') },
+    { id: 'settings',   label: 'Settings',    icon: '⚙️', onSelect: () => navigate('/settings') },
+    { id: 'tasks',      label: 'Tasks',       icon: '✅', onSelect: () => navigate('/tasks') },
+    { id: 'notes',      label: 'Notes',       icon: '📝', onSelect: () => navigate('/notes') },
+    { id: 'calendar',   label: 'Calendar',    icon: '📅', onSelect: () => navigate('/calendar') },
+    ...(isAdmin ? [
+      { id: 'team',   label: 'Team',   icon: '👥', onSelect: () => navigate('/team') },
+      { id: 'server', label: 'Server', icon: '🌊', onSelect: () => navigate('/server') },
+      { id: 'system', label: 'System', icon: '🧰', onSelect: () => navigate('/system') }
+    ] : []),
+    { id: 'new-site', label: 'New Site', subtitle: 'Create a new site', icon: '➕', onSelect: () => navigate('/sites/new') },
+    ...SERVICES.map((s) => ({
+      id: `restart-${s.key}`,
+      label: `Restart ${s.name}`,
+      subtitle: 'service',
+      icon: '🔄',
+      onSelect: runAction(`Restart ${s.name}`, () => api.monitor.control(s.key, 'restart'))
+    }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [navigate, isAdmin])
 
-  const siteActions: Action[] = useMemo(() =>
+  // Per-site "open" entries (always shown) + runnable actions (only surfaced
+  // when searching, to keep the default list short).
+  const siteOpenActions: Action[] = useMemo(() =>
     sites.map((s) => ({
-      id: `site-${s.id}`,
-      label: s.name,
-      subtitle: s.domain,
-      icon: '🔗',
+      id: `site-${s.id}`, label: s.name, subtitle: s.domain, icon: '🔗',
       onSelect: () => navigate(`/sites/${s.id}`)
     })),
     [sites, navigate]
   )
 
-  const allActions = [...staticActions, ...siteActions]
+  const siteRunActions: Action[] = useMemo(() =>
+    sites.flatMap((s) => [
+      { id: `deploy-${s.id}`, label: `Deploy ${s.domain}`,      subtitle: s.name, icon: '🚀', onSelect: runAction(`Deploy ${s.domain}`, () => api.deploy.trigger(s.id)) },
+      { id: `clear-${s.id}`,  label: `Clear cache ${s.domain}`, subtitle: s.name, icon: '🧹', onSelect: runAction(`Clear cache ${s.domain}`, () => api.artisan.run(s.id, 'optimize:clear')) },
+      { id: `logs-${s.id}`,   label: `Logs ${s.domain}`,        subtitle: s.name, icon: '📜', onSelect: () => navigate(`/sites/${s.id}?tab=logs`) },
+      { id: `term-${s.id}`,   label: `Terminal ${s.domain}`,    subtitle: s.name, icon: '💻', onSelect: () => navigate(`/sites/${s.id}?tab=terminal`) }
+    ]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sites, navigate]
+  )
 
   const filtered = query
-    ? allActions.filter((a) =>
+    ? [...baseActions, ...siteOpenActions, ...siteRunActions].filter((a) =>
         a.label.toLowerCase().includes(query.toLowerCase()) ||
         (a.subtitle ?? '').toLowerCase().includes(query.toLowerCase())
       )
-    : allActions
+    : [...baseActions, ...siteOpenActions]
 
   useEffect(() => { setActive(0) }, [query])
 
