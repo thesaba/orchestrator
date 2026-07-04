@@ -122,6 +122,7 @@ model LogError {
   firstSeenAt    DateTime @default(now())
   lastSeenAt     DateTime @default(now())
   resolved       Boolean  @default(false)
+  ignored        Boolean  @default(false) // muted — the collector stops re-surfacing this group
   createdAt      DateTime @default(now())
 
   @@unique([siteId, fingerprint])

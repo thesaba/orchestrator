@@ -203,17 +203,20 @@ export const api = {
     clear: () => request<{ ok: true }>('/notifications', { method: 'DELETE' })
   },
   logErrors: {
-    list: (params?: { siteId?: number; search?: string; resolved?: '0' | '1' }) => {
+    list: (params?: { siteId?: number; search?: string; resolved?: '0' | '1'; ignored?: '1' }) => {
       const p = new URLSearchParams()
       if (params?.siteId) p.set('siteId', String(params.siteId))
       if (params?.search) p.set('search', params.search)
       if (params?.resolved) p.set('resolved', params.resolved)
+      if (params?.ignored) p.set('ignored', params.ignored)
       const qs = p.toString()
       return request<{ errors: LogErrorItem[]; unresolved: number }>(`/log-errors${qs ? `?${qs}` : ''}`)
     },
     get: (id: number) => request<LogErrorDetail>(`/log-errors/${id}`),
     setResolved: (id: number, resolved: boolean) =>
       request<LogErrorItem>(`/log-errors/${id}`, { method: 'PATCH', body: JSON.stringify({ resolved }) }),
+    setIgnored: (id: number, ignored: boolean) =>
+      request<LogErrorItem>(`/log-errors/${id}`, { method: 'PATCH', body: JSON.stringify({ ignored }) }),
     remove: (id: number) => request<{ ok: true }>(`/log-errors/${id}`, { method: 'DELETE' })
   },
   alerts: {
@@ -597,6 +600,7 @@ export interface LogErrorItem {
   firstSeenAt: string
   lastSeenAt: string
   resolved: boolean
+  ignored: boolean
   site: { domain: string }
 }
 
@@ -611,6 +615,7 @@ export interface LogErrorDetail {
   firstSeenAt: string
   lastSeenAt: string
   resolved: boolean
+  ignored: boolean
   site: { id: number; domain: string }
   introducedBy: { id: number; branch: string; commit: string | null; createdAt: string } | null
 }

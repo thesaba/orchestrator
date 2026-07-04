@@ -47,37 +47,37 @@ export function DashboardPage() {
     <Page title="Dashboard">
       <OnboardingWizard />
       <Layout>
-        {/* ── Stats row ─────────────────────────────────────────────────── */}
-        <Layout.Section variant="oneThird">
-          <SystemStatsCard />
-        </Layout.Section>
-        <Layout.Section variant="oneThird">
-          <ServicesCard />
-        </Layout.Section>
-        <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">Quick Stats</Text>
-              {loading ? <SkeletonBodyText lines={3} /> : (
-                <BlockStack gap="200">
-                  {[
-                    { label: 'Active sites', value: activeSites.length },
-                    { label: 'Total sites',  value: sites.length },
-                    { label: 'SSL secured',  value: sites.filter((s) => s.sslEnabled).length },
-                    { label: 'Pinned',       value: sites.filter((s) => s.pinned).length }
-                  ].map(({ label, value }) => (
-                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Text as="p" variant="bodySm" tone="subdued">{label}</Text>
-                      <Text as="p" variant="bodyMd" fontWeight="semibold">{String(value)}</Text>
-                    </div>
-                  ))}
+        {/* ── Stats row (equal-height widgets) ──────────────────────────── */}
+        <Layout.Section>
+          <div className="oc-eqrow">
+            <div><SystemStatsCard /></div>
+            <div><ServicesCard /></div>
+            <div>
+              <Card>
+                <BlockStack gap="400">
+                  <Text as="h2" variant="headingMd">Quick Stats</Text>
+                  {loading ? <SkeletonBodyText lines={3} /> : (
+                    <BlockStack gap="200">
+                      {[
+                        { label: 'Active sites', value: activeSites.length },
+                        { label: 'Total sites',  value: sites.length },
+                        { label: 'SSL secured',  value: sites.filter((s) => s.sslEnabled).length },
+                        { label: 'Pinned',       value: sites.filter((s) => s.pinned).length }
+                      ].map(({ label, value }) => (
+                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <Text as="p" variant="bodySm" tone="subdued">{label}</Text>
+                          <Text as="p" variant="bodyMd" fontWeight="semibold">{String(value)}</Text>
+                        </div>
+                      ))}
+                    </BlockStack>
+                  )}
+                  <Button onClick={() => navigate('/sites/new')} variant="primary" fullWidth>
+                    + New site
+                  </Button>
                 </BlockStack>
-              )}
-              <Button onClick={() => navigate('/sites/new')} variant="primary" fullWidth>
-                + New site
-              </Button>
-            </BlockStack>
-          </Card>
+              </Card>
+            </div>
+          </div>
         </Layout.Section>
 
         {/* ── Deploy history chart ──────────────────────────────────────── */}

@@ -81,6 +81,7 @@ async function collectSite(app: FastifyInstance, siteId: number, logPath: string
 
     for (const [fp, g] of groups) {
       const existing = await app.prisma.logError.findUnique({ where: { siteId_fingerprint: { siteId, fingerprint: fp } } })
+      if (existing?.ignored) continue // muted group — never re-surface
       if (existing) {
         await app.prisma.logError.update({
           where: { id: existing.id },

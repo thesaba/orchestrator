@@ -20,7 +20,7 @@ export function ErrorsPage() {
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
   const [siteId, setSiteId]     = useState('')
-  const [status, setStatus]     = useState<'0' | '1' | ''>('0')
+  const [status, setStatus]     = useState<'0' | '1' | '' | 'ig'>('0')
   const [detail, setDetail]     = useState<LogErrorDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const navigate = useNavigate()
@@ -30,7 +30,8 @@ export function ErrorsPage() {
     api.logErrors.list({
       search: search.trim() || undefined,
       siteId: siteId ? Number(siteId) : undefined,
-      resolved: status || undefined
+      resolved: status === '0' || status === '1' ? status : undefined,
+      ignored: status === 'ig' ? '1' : undefined
     })
       .then((r) => { setErrors(r.errors); setUnresolved(r.unresolved) })
       .catch(() => {})
@@ -49,6 +50,12 @@ export function ErrorsPage() {
   const setResolved = async (id: number, resolved: boolean) => {
     await api.logErrors.setResolved(id, resolved).catch(() => {})
     setDetail((d) => (d && d.id === id ? { ...d, resolved } : d))
+    load()
+  }
+
+  const setIgnored = async (id: number, ignored: boolean) => {
+    await api.logErrors.setIgnored(id, ignored).catch(() => {})
+    setDetail((d) => (d && d.id === id ? { ...d, ignored } : d))
     load()
   }
 
@@ -80,9 +87,9 @@ export function ErrorsPage() {
           <div style={{ width: 160 }}>
             <Select
               label="Status" labelHidden
-              options={[{ label: 'Unresolved', value: '0' }, { label: 'Resolved', value: '1' }, { label: 'All', value: '' }]}
+              options={[{ label: 'Unresolved', value: '0' }, { label: 'Resolved', value: '1' }, { label: 'All', value: '' }, { label: 'Ignored', value: 'ig' }]}
               value={status}
-              onChange={(v) => setStatus(v as '0' | '1' | '')}
+              onChange={(v) => setStatus(v as '0' | '1' | '' | 'ig')}
             />
           </div>
         </InlineStack>
@@ -109,6 +116,7 @@ export function ErrorsPage() {
                       <Badge tone={levelTone(e.level)}>{e.level}</Badge>
                       {e.exceptionClass && <Text as="span" fontWeight="semibold">{e.exceptionClass}</Text>}
                       {e.resolved && <Badge tone="success">resolved</Badge>}
+                      {e.ignored && <Badge>ignored</Badge>}
                     </InlineStack>
                     <Text as="span" variant="bodySm" truncate>{e.message}</Text>
                     <Text as="span" variant="bodySm" tone="subdued">
@@ -117,6 +125,11 @@ export function ErrorsPage() {
                   </BlockStack>
                   <InlineStack gap="200" blockAlign="center">
                     <Badge tone={e.count > 1 ? 'attention' : undefined}>{`×${e.count}`}</Badge>
+                    <div onClick={(ev) => ev.stopPropagation()}>
+                      <Button size="micro" variant="tertiary" onClick={() => setIgnored(e.id, !e.ignored)}>
+                        {e.ignored ? 'Un-ignore' : 'Ignore'}
+                      </Button>
+                    </div>
                   </InlineStack>
                 </InlineStack>
               </div>
@@ -132,6 +145,7 @@ export function ErrorsPage() {
         title={detail?.exceptionClass ?? 'Error detail'}
         primaryAction={detail ? { content: detail.resolved ? 'Reopen' : 'Mark resolved', onAction: () => setResolved(detail.id, !detail.resolved) } : undefined}
         secondaryActions={detail ? [
+          { content: detail.ignored ? 'Un-ignore' : 'Ignore similar', onAction: () => setIgnored(detail.id, !detail.ignored) },
           { content: 'Open site', onAction: () => navigate(`/sites/${detail.siteId}?tab=logs`) },
           { content: 'Delete', destructive: true, onAction: () => remove(detail.id) }
         ] : []}
@@ -146,6 +160,7 @@ export function ErrorsPage() {
                 <Badge>{detail.site.domain}</Badge>
                 <Badge tone={detail.count > 1 ? 'attention' : undefined}>{`×${detail.count}`}</Badge>
                 {detail.resolved && <Badge tone="success">resolved</Badge>}
+                {detail.ignored && <Badge>ignored</Badge>}
               </InlineStack>
 
               <Text as="p" fontWeight="medium">{detail.message}</Text>

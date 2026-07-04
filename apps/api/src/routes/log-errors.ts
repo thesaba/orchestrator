@@ -8,11 +8,17 @@ export const logErrorsRoutes: FastifyPluginAsync = async (app) => {
 
   // GET / — grouped errors across sites, filterable.
   app.get('/', async (request) => {
-    const q = request.query as { siteId?: string; search?: string; resolved?: string }
+    const q = request.query as { siteId?: string; search?: string; resolved?: string; ignored?: string }
     const where: Record<string, unknown> = {}
     if (q.siteId) where.siteId = Number(q.siteId)
-    if (q.resolved === '0') where.resolved = false
-    if (q.resolved === '1') where.resolved = true
+    // The "ignored" view shows muted groups; otherwise ignored ones are hidden.
+    if (q.ignored === '1') {
+      where.ignored = true
+    } else {
+      where.ignored = false
+      if (q.resolved === '0') where.resolved = false
+      if (q.resolved === '1') where.resolved = true
+    }
     if (q.search) {
       where.OR = [
         { message: { contains: q.search } },
@@ -27,11 +33,11 @@ export const logErrorsRoutes: FastifyPluginAsync = async (app) => {
         take: 200,
         select: {
           id: true, siteId: true, level: true, exceptionClass: true, message: true,
-          count: true, firstSeenAt: true, lastSeenAt: true, resolved: true,
+          count: true, firstSeenAt: true, lastSeenAt: true, resolved: true, ignored: true,
           site: { select: { domain: true } }
         }
       }),
-      app.prisma.logError.count({ where: { resolved: false } })
+      app.prisma.logError.count({ where: { resolved: false, ignored: false } })
     ])
     return { errors, unresolved }
   })
@@ -56,13 +62,16 @@ export const logErrorsRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /:id — resolve / unresolve.
   app.patch('/:id', {
-    schema: { body: { type: 'object', properties: { resolved: { type: 'boolean' } }, additionalProperties: false } }
+    schema: { body: { type: 'object', properties: { resolved: { type: 'boolean' }, ignored: { type: 'boolean' } }, additionalProperties: false } }
   }, async (request, reply) => {
     const id = Number((request.params as { id: string }).id)
-    const { resolved } = request.body as { resolved?: boolean }
+    const { resolved, ignored } = request.body as { resolved?: boolean; ignored?: boolean }
     const err = await app.prisma.logError.update({
       where: { id },
-      data: { ...(resolved !== undefined && { resolved }) }
+      data: {
+        ...(resolved !== undefined && { resolved }),
+        ...(ignored !== undefined && { ignored })
+      }
     }).catch(() => null)
     if (!err) return reply.code(404).send({ error: 'Not found' })
     return err

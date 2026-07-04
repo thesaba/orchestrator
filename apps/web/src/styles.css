@@ -30,6 +30,18 @@
   border: 1px solid #21262d;
 }
 
+/* ─── Equal-height widget row (e.g. Dashboard stats) ────────────────────────── */
+.oc-eqrow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.oc-eqrow > div { height: 100%; }
+/* Make the Polaris Card inside each cell fill the (stretched) cell height so
+   all three widgets are visually the same size regardless of content. */
+.oc-eqrow > div > * { height: 100%; box-sizing: border-box; }
+
 /* ─── Env editor input ───────────────────────────────────────────────────────── */
 .oc-env-input {
   width: 100%;
