@@ -195,6 +195,21 @@ export const api = {
     // Streamed actions (/system/run/:key/stream) are consumed directly via
     // ProvisionLog/consumeSSE with the built endpoint URL.
   },
+  notifications: {
+    list: () => request<{ notifications: AppNotification[]; unread: number }>('/notifications'),
+    readAll: () => request<{ ok: true }>('/notifications/read-all', { method: 'POST' }),
+    read: (id: number) => request<{ ok: true }>(`/notifications/${id}/read`, { method: 'POST' }),
+    remove: (id: number) => request<{ ok: true }>(`/notifications/${id}`, { method: 'DELETE' }),
+    clear: () => request<{ ok: true }>('/notifications', { method: 'DELETE' })
+  },
+  alerts: {
+    list: () => request<{ rules: AlertRule[] }>('/alerts'),
+    create: (data: { metric: string; operator?: string; threshold: number; cooldownMins?: number }) =>
+      request<AlertRule>('/alerts', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: number, data: { enabled?: boolean; operator?: string; threshold?: number; cooldownMins?: number }) =>
+      request<AlertRule>(`/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    remove: (id: number) => request<{ ok: true }>(`/alerts/${id}`, { method: 'DELETE' })
+  },
   tokens: {
     list: () => request<{ tokens: AccessToken[] }>('/tokens'),
     create: (name: string, expiresInDays?: number) =>
@@ -533,6 +548,28 @@ export interface AccessToken {
   tokenPrefix: string
   lastUsedAt: string | null
   expiresAt: string | null
+  createdAt: string
+}
+
+export interface AppNotification {
+  id: number
+  type: string
+  level: 'info' | 'success' | 'warning' | 'critical'
+  title: string
+  body: string | null
+  meta: string | null
+  read: boolean
+  createdAt: string
+}
+
+export interface AlertRule {
+  id: number
+  metric: 'cpu' | 'ram' | 'disk' | 'swap'
+  operator: 'gt' | 'lt'
+  threshold: number
+  enabled: boolean
+  cooldownMins: number
+  lastTriggeredAt: string | null
   createdAt: string
 }
 

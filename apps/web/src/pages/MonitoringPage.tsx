@@ -4,6 +4,8 @@ import { api, Site, ServiceStatus } from '../api/client'
 import { SystemStatsCard }    from '../components/SystemStatsCard'
 import { MetricsHistoryCard } from '../components/MetricsHistoryCard'
 import { TopProcessesCard }   from '../components/TopProcessesCard'
+import { AlertRulesCard }     from '../components/AlertRulesCard'
+import { useAuth }            from '../context/AuthContext'
 import { ServiceControlCard } from '../components/ServiceControlCard'
 import { LogTailViewer }      from '../components/LogTailViewer'
 import { ActivityLog }        from '../components/ActivityLog'
@@ -21,6 +23,7 @@ const DEPLOY_TONE: Record<string, 'success' | 'critical' | 'info' | 'warning'> =
 }
 
 export function MonitoringPage() {
+  const { isAdmin } = useAuth()
   const [sites, setSites]       = useState<Site[]>([])
   const [services, setServices] = useState<ServiceStatus[]>([])
 
@@ -72,6 +75,7 @@ export function MonitoringPage() {
     },
     { id: 'uptime',         title: 'Uptime monitor', defaultWidth: 'half', node: <UptimeCard /> },
     { id: 'ssl',            title: 'SSL expiry',     defaultWidth: 'half', node: <SslExpiryCard /> },
+    ...(isAdmin ? [{ id: 'alert-rules', title: 'Alert rules', defaultWidth: 'half' as const, node: <AlertRulesCard /> }] : []),
     { id: 'top-processes',  title: 'Top services by resource use', defaultWidth: 'full', node: <TopProcessesCard /> },
     { id: 'services',       title: 'Service control', defaultWidth: 'full', node: <ServiceControlCard services={services} onRefresh={refreshServices} /> },
     {
@@ -134,7 +138,7 @@ export function MonitoringPage() {
       id: 'activity', title: 'Activity log', defaultWidth: 'full',
       node: <Card><ActivityLog sites={sites} /></Card>
     }
-  ], [sites, services, refreshServices, recentDeploys, monitoredSites])
+  ], [sites, services, refreshServices, recentDeploys, monitoredSites, isAdmin])
 
   return (
     <Page title="Monitoring" subtitle="Customizable dashboard — reorder, resize, hide widgets, and save presets">

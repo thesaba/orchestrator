@@ -8,6 +8,7 @@ import path from 'path'
 import crypto from 'crypto'
 import os from 'os'
 import { notifyDeploy } from '../lib/notify'
+import { createNotification } from '../lib/notifications'
 import { decryptSecret, encryptSecret } from '../lib/crypto'
 import { isValidGitUrl, execFileP } from '../lib/exec'
 import { parseTestSummary } from '../lib/test-parse'
@@ -348,6 +349,15 @@ export async function runDeploy(
         testsPassed: m.passed, testsFailed: m.failed, testsTotal: m.total
       })
     }
+
+    // In-app notification (bell feed) for every deploy result.
+    createNotification(app, {
+      type: 'deploy',
+      level: status === 'success' ? 'success' : 'critical',
+      title: `Deploy ${status === 'success' ? 'succeeded' : 'failed'}${opts.domain ? ` — ${opts.domain}` : ''}`,
+      body: commitHash ? `${opts.branch} @ ${commitHash}${commitMessage ? ` — ${commitMessage}` : ''}` : opts.branch,
+      meta: { siteId, domain: opts.domain }
+    })
 
     emitter.emit('done', status)
     deployEmitters.delete(siteId)

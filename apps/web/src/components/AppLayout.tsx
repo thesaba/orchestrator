@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext'
 import { ToastContext, ToastOptions } from '../context/toast'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { CommandPalette } from './CommandPalette'
+import { NotificationBell } from './NotificationBell'
 import { QuickActionsFab } from './QuickActionsFab'
 import { api, AuditEntry, Site } from '../api/client'
 
@@ -398,6 +399,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       showNavigationToggle
       onNavigationToggle={() => setMobileNavOpen((p) => !p)}
       contextControl={contextControl}
+      secondaryMenu={<NotificationBell />}
       searchField={
         <TopBar.SearchField
           placeholder="Search or ⌘K for commands"

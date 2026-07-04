@@ -42,7 +42,10 @@ import { serverRoutes } from './routes/server'
 import { dashboardRoutes } from './routes/dashboard'
 import { systemRoutes } from './routes/system'
 import { tokensRoutes } from './routes/tokens'
+import { notificationsRoutes } from './routes/notifications'
+import { alertsRoutes } from './routes/alerts'
 import { startUptimeMonitor } from './lib/uptime-monitor'
+import { startAlertsMonitor } from './lib/alerts-monitor'
 import { startSslMonitor } from './lib/ssl-monitor'
 import { startMetricsMonitor } from './lib/metrics-monitor'
 
@@ -119,6 +122,8 @@ async function start() {
   await app.register(dashboardRoutes,   { prefix: '/api/dashboard' })
   await app.register(systemRoutes,      { prefix: '/api/system' })
   await app.register(tokensRoutes,      { prefix: '/api/tokens' })
+  await app.register(notificationsRoutes, { prefix: '/api/notifications' })
+  await app.register(alertsRoutes,      { prefix: '/api/alerts' })
 
   // Loopback-only, shared-secret-protected — used by the phpMyAdmin signon
   // bridge to redeem a one-time token for real DB credentials. See
@@ -140,6 +145,7 @@ async function start() {
   startUptimeMonitor(app.prisma)
   startSslMonitor(app)
   startMetricsMonitor(app.prisma)
+  startAlertsMonitor(app)
 
   // Graceful shutdown: kill any in-flight deploys before exiting. Deploy
   // child processes are spawned `detached: true` so they survive this

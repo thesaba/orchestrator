@@ -105,6 +105,35 @@ model Site {
   envVersions     EnvVersion[]
 }
 
+// In-app notification feed (deploy results, threshold alerts, SSL, …). Global
+// to the panel — the bell shows the unread count and recent items.
+model Notification {
+  id        Int      @id @default(autoincrement())
+  type      String   // 'deploy' | 'alert' | 'ssl' | 'uptime' | 'system'
+  level     String   @default("info") // info | success | warning | critical
+  title     String
+  body      String?
+  meta      String?  // JSON blob (e.g. { siteId, domain })
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([read, createdAt])
+}
+
+// A user-defined threshold on a system metric. The alerts monitor evaluates
+// enabled rules on a schedule and raises a Notification (and fans out to the
+// configured channels) when the condition holds, respecting a per-rule cooldown.
+model AlertRule {
+  id              Int       @id @default(autoincrement())
+  metric          String    // 'cpu' | 'ram' | 'disk' | 'swap'
+  operator        String    @default("gt") // 'gt' | 'lt'
+  threshold       Int       // percent (0–100)
+  enabled         Boolean   @default(true)
+  cooldownMins    Int       @default(30)
+  lastTriggeredAt DateTime?
+  createdAt       DateTime  @default(now())
+}
+
 // Snapshot of a site's .env each time it's saved from the panel, so edits can
 // be diffed and rolled back. Content is encrypted at rest (it holds secrets).
 model EnvVersion {
