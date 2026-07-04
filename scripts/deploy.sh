@@ -47,6 +47,10 @@ git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$RELEASE_DIR"
 cd "$RELEASE_DIR"
 COMMIT=$(git rev-parse --short HEAD)
 log "  Commit: $COMMIT"
+# Machine-readable commit metadata for the deploy notifier (parsed by deploy.ts).
+# %s = subject (single line), %an = author name. Best-effort; empty if git errors.
+echo "__COMMIT_MSG__:$(git log -1 --pretty=%s 2>/dev/null | tr -d '\r\n')"
+echo "__COMMIT_AUTHOR__:$(git log -1 --pretty=%an 2>/dev/null | tr -d '\r\n')"
 
 # ── 2. Link shared files ─────────────────────────────────────────────────────
 log "[2/8] Linking shared files..."

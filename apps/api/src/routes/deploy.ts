@@ -225,7 +225,10 @@ export async function runDeploy(
   )
   deployProcs.set(siteId, proc)
 
+  const startedAt = Date.now()
   let commitHash = ''
+  let commitMessage: string | null = null
+  let commitAuthor: string | null = null
   // Test outcome reported by deploy.sh via a __TESTS__ marker. 'skipped' when a
   // tests-enabled site was deployed with the emergency override.
   let testResult: string | null = opts.runTests && opts.skipTests ? 'skipped' : null
@@ -235,6 +238,10 @@ export async function runDeploy(
     emitter.emit('log', line)
     const m = line.match(/__COMMIT__:([a-f0-9]+)/)
     if (m) commitHash = m[1]
+    const cm = line.match(/__COMMIT_MSG__:(.*)/)
+    if (cm) commitMessage = cm[1].trim() || null
+    const ca = line.match(/__COMMIT_AUTHOR__:(.*)/)
+    if (ca) commitAuthor = ca[1].trim() || null
     const t = line.match(/__TESTS__:(passed|failed)/)
     if (t) testResult = t[1]
   }
@@ -333,7 +340,10 @@ export async function runDeploy(
     if (opts.domain) {
       notifyDeploy(app, {
         domain: opts.domain, branch: opts.branch, commit: commitHash || null, status, siteId,
-        testResult
+        testResult,
+        durationMs: Date.now() - startedAt,
+        commitMessage, commitAuthor,
+        testsPassed: m.passed, testsFailed: m.failed, testsTotal: m.total
       })
     }
 

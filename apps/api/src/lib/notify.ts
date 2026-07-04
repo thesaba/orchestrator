@@ -65,17 +65,72 @@ interface DeployOpts {
   status: 'success' | 'failed'
   siteId: number
   testResult?: string | null
+  /** Total wall-clock time of the deploy, in ms. */
+  durationMs?: number | null
+  /** Subject line of the deployed commit. */
+  commitMessage?: string | null
+  /** Author name of the deployed commit. */
+  commitAuthor?: string | null
+  testsPassed?: number | null
+  testsFailed?: number | null
+  testsTotal?: number | null
+}
+
+/** "1h 4m", "2m 34s", "12s" — compact human-readable duration. */
+function fmtDuration(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rs = s % 60
+  if (m < 60) return rs ? `${m}m ${rs}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return rm ? `${h}h ${rm}m` : `${h}h`
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 
 export async function notifyDeploy(app: FastifyInstance, opts: DeployOpts): Promise<void> {
-  const fields = [
-    { label: 'Branch', value: opts.branch },
-    { label: 'Commit', value: opts.commit ?? '—' }
+  const fields: { label: string; value: string }[] = [
+    { label: 'Branch', value: opts.branch }
   ]
+
+  // Commit line: hash + subject when we have both, so the alert says *what*
+  // shipped, not just an opaque SHA.
+  const commitValue = opts.commit
+    ? (opts.commitMessage ? `${opts.commit} — ${truncate(opts.commitMessage, 80)}` : opts.commit)
+    : '—'
+  fields.push({ label: 'Commit', value: commitValue })
+
+  if (opts.commitAuthor) fields.push({ label: 'Author', value: opts.commitAuthor })
+
+  if (opts.durationMs != null && opts.durationMs > 0) {
+    fields.push({ label: 'Duration', value: fmtDuration(opts.durationMs) })
+  }
+
   if (opts.testResult) {
     const icon = opts.testResult === 'passed' ? '✅' : opts.testResult === 'failed' ? '❌' : '⏭️'
-    fields.push({ label: 'Tests', value: `${icon} ${opts.testResult}` })
+    let value = `${icon} ${opts.testResult}`
+    // Append pass/fail counts when the runner summary was parsed.
+    if (opts.testsPassed != null || opts.testsFailed != null) {
+      const parts: string[] = []
+      if (opts.testsPassed != null) parts.push(`${opts.testsPassed} passed`)
+      if (opts.testsFailed != null) parts.push(`${opts.testsFailed} failed`)
+      const total = opts.testsTotal != null ? ` / ${opts.testsTotal}` : ''
+      value += ` — ${parts.join(', ')}${total}`
+    }
+    fields.push({ label: 'Tests', value })
   }
+
+  // Completion timestamp (UTC) so the alert is self-dating even if the channel
+  // doesn't show its own receive time.
+  fields.push({
+    label: 'Finished',
+    value: new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
+  })
+
   await sendNotification(app, {
     title: opts.status === 'success' ? 'Deploy succeeded' : 'Deploy FAILED',
     subject: opts.domain,
