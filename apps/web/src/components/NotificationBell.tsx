@@ -45,12 +45,16 @@ export function NotificationBell() {
     <button
       onClick={toggle}
       aria-label="Notifications"
-      style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', padding: '0 14px', height: '100%', fontSize: 18, lineHeight: 1 }}
+      style={{
+        position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        alignSelf: 'center', height: '3.5rem', background: 'none', border: 'none', cursor: 'pointer',
+        padding: '0 12px', fontSize: 20
+      }}
     >
-      🔔
+      <span aria-hidden style={{ lineHeight: 1 }}>🔔</span>
       {unread > 0 && (
         <span style={{
-          position: 'absolute', top: 8, right: 8, minWidth: 16, height: 16, padding: '0 4px',
+          position: 'absolute', top: '0.75rem', right: 4, minWidth: 16, height: 16, padding: '0 4px',
           borderRadius: 8, background: '#d72c0d', color: '#fff', fontSize: 10, lineHeight: '16px',
           textAlign: 'center', fontWeight: 700
         }}>
