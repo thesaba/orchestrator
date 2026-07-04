@@ -45,6 +45,15 @@ run_hook "pre-deploy.sh"
 log "[1/8] Cloning repository..."
 git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$RELEASE_DIR"
 cd "$RELEASE_DIR"
+# Optional: deploy a specific ref (tag/branch/commit) instead of branch HEAD.
+# Additive — when REF is unset the clone above is used exactly as before.
+if [ -n "${REF:-}" ]; then
+  log "  Checking out ref: $REF"
+  git fetch --depth 1 origin "$REF" 2>&1 \
+    && git checkout --quiet FETCH_HEAD 2>&1 \
+    || git checkout --quiet "$REF" 2>&1 \
+    || { log "  ✗ ref '$REF' not found"; exit 1; }
+fi
 COMMIT=$(git rev-parse --short HEAD)
 log "  Commit: $COMMIT"
 # Machine-readable commit metadata for the deploy notifier (parsed by deploy.ts).

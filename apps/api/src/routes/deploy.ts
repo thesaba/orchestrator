@@ -6,9 +6,10 @@ import { promisify } from 'util'
 import http from 'http'
 import path from 'path'
 import crypto from 'crypto'
+import os from 'os'
 import { notifyDeploy } from '../lib/notify'
 import { decryptSecret, encryptSecret } from '../lib/crypto'
-import { isValidGitUrl } from '../lib/exec'
+import { isValidGitUrl, execFileP } from '../lib/exec'
 import { parseTestSummary } from '../lib/test-parse'
 
 const exec = promisify(execCb)
@@ -184,6 +185,7 @@ export async function runDeploy(
     testTimeout?: number
     testUseSqlite?: boolean
     skipTests?: boolean // one-off emergency override (bypasses runTests)
+    ref?: string        // deploy a specific tag/branch/commit instead of branch HEAD
   }
 ): Promise<number> {
   if (deployEmitters.has(siteId)) {
@@ -221,7 +223,7 @@ export async function runDeploy(
   const proc = spawn(
     'bash',
     [path.join(scriptsDir(), 'deploy.sh'), opts.rootPath, opts.branch, opts.phpVersion],
-    { env: { ...process.env, REPO_URL: authenticatedRepoUrl, ...testEnv }, detached: true } // detached so we can kill the whole process group (git/composer/npm children), not just bash
+    { env: { ...process.env, REPO_URL: authenticatedRepoUrl, ...testEnv, ...(opts.ref ? { REF: opts.ref } : {}) }, detached: true } // detached so we can kill the whole process group (git/composer/npm children), not just bash
   )
   deployProcs.set(siteId, proc)
 
@@ -419,12 +421,62 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     }
   })
 
+  // GET /:id/deploy/pending — commits on the remote branch not yet deployed.
+  // On-demand blob-less bare clone to compute the log without a checkout;
+  // cleaned up immediately. Read-only — never touches the live site.
+  app.get('/:id/deploy/pending', async (request, reply) => {
+    const siteId = Number((request.params as { id: string }).id)
+    const site = await app.prisma.site.findUnique({ where: { id: siteId } })
+    if (!site) return reply.code(404).send({ error: 'Site not found' })
+    if (!site.repoUrl) return reply.code(400).send({ error: 'No repository URL configured' })
+
+    const url = buildAuthenticatedUrl(site.repoUrl, site.gitToken ? decryptSecret(site.gitToken) : null)
+    const last = await app.prisma.deployment.findFirst({
+      where: { siteId, status: 'success', commit: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { commit: true }
+    })
+
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-pending-'))
+    const FMT = '--pretty=format:%H%x1f%s%x1f%an%x1f%aI'
+    const parse = (out: string) => out.split('\n').filter(Boolean).map((line) => {
+      const [hash, subject, author, date] = line.split('\x1f')
+      return { hash: (hash ?? '').slice(0, 7), subject: subject ?? '', author: author ?? '', date: date ?? '' }
+    })
+    try {
+      await execFileP('git', ['clone', '--bare', '--filter=blob:none', '--single-branch', '--branch', site.branch, url, tmp], { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })
+      const remoteCommit = (await execFileP('git', ['-C', tmp, 'rev-parse', 'HEAD'], { timeout: 10_000 })).stdout.trim().slice(0, 7)
+
+      let commits: ReturnType<typeof parse> = []
+      let range = false
+      if (last?.commit) {
+        try {
+          const { stdout } = await execFileP('git', ['-C', tmp, 'log', `${last.commit}..HEAD`, FMT, '-n', '50'], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 })
+          commits = parse(stdout); range = true
+        } catch { /* last commit not an ancestor (force-push/unrelated) — fall back */ }
+      }
+      if (!range) {
+        const { stdout } = await execFileP('git', ['-C', tmp, 'log', FMT, '-n', '20'], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 })
+        commits = parse(stdout)
+      }
+      return { branch: site.branch, currentCommit: last?.commit ?? null, remoteCommit, upToDate: last?.commit === remoteCommit, range, commits }
+    } catch (err: unknown) {
+      return reply.code(502).send({ error: `Could not read the remote: ${(err as Error).message}` })
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
   // POST /:id/deploy?skipTests=1 — trigger deploy (or queue if one is running).
   // skipTests is a one-off emergency override that bypasses the site's test gate
   // for this deploy only (e.g. urgent hotfix); the site setting is untouched.
   app.post('/:id/deploy', async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
-    const skipTests = (request.query as { skipTests?: string }).skipTests === '1'
+    const q = request.query as { skipTests?: string; ref?: string }
+    const skipTests = q.skipTests === '1'
+    // Optional ref (tag/branch/commit). Validated to a safe git ref shape so it
+    // can never inject shell/option args (it's also passed via env, not argv).
+    const ref = q.ref && /^[A-Za-z0-9._/\-]{1,100}$/.test(q.ref) ? q.ref : undefined
 
     const site = await app.prisma.site.findUnique({ where: { id: siteId } })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
@@ -452,7 +504,8 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         healthCheck: site.healthCheck,
         healthCheckUrl: site.healthCheckUrl,
         ...siteTestOpts(site),
-        skipTests
+        skipTests,
+        ref
       })
       return { started: true, deploymentId }
     } catch (err: unknown) {

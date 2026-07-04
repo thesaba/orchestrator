@@ -23,6 +23,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ArtisanCommand, Deployment, Release, Site, maintenanceApi, logsApi, redeployApi } from '../api/client'
 import { phpVersionOptions } from '../utils/php'
 import { ProvisionLog }      from '../components/ProvisionLog'
+import { DeployReview }       from '../components/DeployReview'
 import { ConfigEditor }      from '../components/ConfigEditor'
 import { WorkersTab }        from '../components/WorkersTab'
 import { SslTab }            from '../components/SslTab'
@@ -235,7 +236,7 @@ export function SiteDetailPage() {
     } finally { setPhpSwitching(false) }
   }
 
-  const handleDeploy = async (opts?: { skipTests?: boolean }) => {
+  const handleDeploy = async (opts?: { skipTests?: boolean; ref?: string }) => {
     if (!site?.repoUrl) {
       setTab(TAB.SETTINGS)
       setDeployError('Set a repository URL in the Deploy Settings tab first.')
@@ -514,9 +515,12 @@ export function SiteDetailPage() {
       subtitle={site.name}
       backAction={{ content: 'Sites', onAction: () => navigate('/sites') }}
       primaryAction={
-        <Button variant="primary" onClick={() => handleDeploy()} loading={deploying} disabled={site.status !== 'active'}>
-          Deploy
-        </Button>
+        <InlineStack gap="200">
+          <DeployReview siteId={siteId} onDeploy={handleDeploy} disabled={deploying || site.status !== 'active'} />
+          <Button variant="primary" onClick={() => handleDeploy()} loading={deploying} disabled={site.status !== 'active'}>
+            Deploy
+          </Button>
+        </InlineStack>
       }
       secondaryActions={[
         { content: site.sslEnabled ? '🔒 SSL' : 'SSL', onAction: () => setTab(TAB.SSL) },

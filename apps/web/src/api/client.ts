@@ -161,10 +161,17 @@ export const api = {
       })
   },
   deploy: {
-    trigger: (siteId: number, opts?: { skipTests?: boolean }) =>
-      request<{ started: boolean; deploymentId: number } | { queued: boolean; message: string }>(
-        `/sites/${siteId}/deploy${opts?.skipTests ? '?skipTests=1' : ''}`, { method: 'POST' }
-      ),
+    trigger: (siteId: number, opts?: { skipTests?: boolean; ref?: string }) => {
+      const p = new URLSearchParams()
+      if (opts?.skipTests) p.set('skipTests', '1')
+      if (opts?.ref) p.set('ref', opts.ref)
+      const qs = p.toString()
+      return request<{ started: boolean; deploymentId: number } | { queued: boolean; message: string }>(
+        `/sites/${siteId}/deploy${qs ? `?${qs}` : ''}`, { method: 'POST' }
+      )
+    },
+    pending: (siteId: number) =>
+      request<PendingChanges>(`/sites/${siteId}/deploy/pending`),
     generateWebhookToken: (siteId: number) =>
       request<{ webhookToken: string }>(`/sites/${siteId}/webhook-token`, { method: 'POST' })
   },
@@ -534,6 +541,22 @@ export interface EnvVersionMeta {
   note: string | null
   createdAt: string
   createdBy: { email: string } | null
+}
+
+export interface PendingCommit {
+  hash: string
+  subject: string
+  author: string
+  date: string
+}
+
+export interface PendingChanges {
+  branch: string
+  currentCommit: string | null
+  remoteCommit: string
+  upToDate: boolean
+  range: boolean
+  commits: PendingCommit[]
 }
 
 export interface ServiceControlResult {
