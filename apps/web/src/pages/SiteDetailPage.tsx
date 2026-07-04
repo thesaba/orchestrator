@@ -36,6 +36,7 @@ import { DeployTimeline }    from '../components/DeployTimeline'
 import { LaravelLogsTab }    from '../components/LaravelLogsTab'
 import { FileManagerTab }    from '../components/FileManagerTab'
 import { DeployHeatmap }     from '../components/DeployHeatmap'
+import { TestResultsCard }   from '../components/TestResultsCard'
 import { HealthScoreBadge }  from '../components/HealthScoreBadge'
 import { Breadcrumb }        from '../components/Breadcrumb'
 import { useToast } from '../context/toast'
@@ -616,6 +617,10 @@ export function SiteDetailPage() {
           {/* Tab 0 — Deployments + Timeline */}
           {tab === TAB.DEPLOYS && (
             <BlockStack gap="400">
+              {/* Test analytics — shown when tests are enabled or any run exists */}
+              {(site.runTests || site.deployments.some((d) => d.testResult === 'passed' || d.testResult === 'failed')) && (
+                <TestResultsCard siteId={siteId} deployments={site.deployments} />
+              )}
               {site.deployments.length > 0 && (
                 <Card>
                   <BlockStack gap="300">

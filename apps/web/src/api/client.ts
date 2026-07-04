@@ -77,7 +77,34 @@ export interface Deployment {
   log: string | null
   comment?: string | null
   testResult?: 'passed' | 'failed' | 'skipped' | null
+  testsPassed?: number | null
+  testsFailed?: number | null
+  testsTotal?: number | null
+  testDurationMs?: number | null
   createdAt: string
+}
+
+export interface TestStats {
+  totalRuns: number
+  passRate: number | null
+  avgDurationMs: number | null
+  lastRun: {
+    id: number
+    commit: string | null
+    testResult: 'passed' | 'failed'
+    createdAt: string
+    testsPassed: number | null
+    testsFailed: number | null
+    testsTotal: number | null
+    testDurationMs: number | null
+  } | null
+  trend: {
+    date: string
+    result: 'passed' | 'failed'
+    passed: number | null
+    failed: number | null
+    total: number | null
+  }[]
 }
 
 export const api = {
@@ -119,7 +146,9 @@ export const api = {
     branches: (id: number) =>
       request<{ branches: string[] }>(`/sites/${id}/branches`),
     tags: () =>
-      request<{ tags: string[] }>('/sites/tags')
+      request<{ tags: string[] }>('/sites/tags'),
+    testStats: (id: number) =>
+      request<TestStats>(`/sites/${id}/test-stats`)
   },
   provision: {
     start: (

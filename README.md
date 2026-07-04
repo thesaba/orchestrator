@@ -63,6 +63,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🔐 Private repos via encrypted access tokens
 - 🪝 **GitHub webhooks** — auto-deploy on push (HMAC-verified)
 - 🧪 **Deploy-time test gate** — run PHP tests before going live (block/warn, isolated SQLite)
+- 📊 **Test analytics** — pass rate, duration & pass/fail trend per site
 - 🩺 Post-deploy **health checks** with **auto-rollback**
 - 🧩 Custom **pre / post-deploy hooks**
 - 📜 Live streaming deploy logs (SSE)
