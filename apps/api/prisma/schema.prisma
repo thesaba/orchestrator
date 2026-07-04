@@ -28,6 +28,7 @@ model User {
   calendarAttending CalendarEventAttendee[]
   dashboardPresets  DashboardPreset[]
   accessTokens      PersonalAccessToken[]
+  envVersions       EnvVersion[]
 }
 
 // Personal Access Token for scripting the panel API (CI, curl). Only a SHA-256
@@ -101,6 +102,22 @@ model Site {
   tasks           Task[]
   noteEntries     Note[]
   calendarEvents  CalendarEvent[]
+  envVersions     EnvVersion[]
+}
+
+// Snapshot of a site's .env each time it's saved from the panel, so edits can
+// be diffed and rolled back. Content is encrypted at rest (it holds secrets).
+model EnvVersion {
+  id          Int      @id @default(autoincrement())
+  siteId      Int
+  site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  content     String
+  note        String?
+  createdById Int?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([siteId, createdAt])
 }
 
 model SiteUser {

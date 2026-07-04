@@ -362,6 +362,14 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ content })
       }),
+    envVersions: (siteId: number) =>
+      request<{ versions: EnvVersionMeta[] }>(`/sites/${siteId}/config/env/versions`),
+    envVersion: (siteId: number, vid: number) =>
+      request<{ content: string; createdAt: string }>(`/sites/${siteId}/config/env/versions/${vid}`),
+    restoreEnvVersion: (siteId: number, vid: number) =>
+      request<{ ok: boolean; content: string; message: string }>(`/sites/${siteId}/config/env/versions/${vid}/restore`, {
+        method: 'POST'
+      }),
     getPhpVersions: (siteId: number) =>
       request<{ current: string; available: string[] }>(`/sites/${siteId}/php-versions`),
     switchPhpVersion: (siteId: number, version: string) =>
@@ -519,6 +527,13 @@ export interface AccessToken {
   lastUsedAt: string | null
   expiresAt: string | null
   createdAt: string
+}
+
+export interface EnvVersionMeta {
+  id: number
+  note: string | null
+  createdAt: string
+  createdBy: { email: string } | null
 }
 
 export interface ServiceControlResult {

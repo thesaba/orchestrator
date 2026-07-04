@@ -1,9 +1,32 @@
-import { BlockStack, InlineStack, Text, Button, Banner, TextField, Card, Badge } from '@shopify/polaris'
+import { BlockStack, InlineStack, Text, Button, Banner, TextField, Card, Badge, Modal, Spinner } from '@shopify/polaris'
 import { useEffect, useState, useCallback } from 'react'
-import { api } from '../api/client'
+import { api, EnvVersionMeta } from '../api/client'
 import { useToast } from '../context/toast'
 
 interface EnvVar { key: string; value: string; comment?: string }
+
+type DiffEntry = { type: 'same' | 'add' | 'del'; text: string }
+
+// Minimal LCS line diff of `current` → `version`: `del` = lines only in the
+// current file (removed on restore), `add` = lines the version would bring in.
+function diffLines(current: string, version: string): DiffEntry[] {
+  const a = current.split('\n'), b = version.split('\n')
+  const m = a.length, n = b.length
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+  const out: DiffEntry[] = []
+  let i = 0, j = 0
+  while (i < m && j < n) {
+    if (a[i] === b[j]) { out.push({ type: 'same', text: a[i] }); i++; j++ }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ type: 'del', text: a[i] }); i++ }
+    else { out.push({ type: 'add', text: b[j] }); j++ }
+  }
+  while (i < m) out.push({ type: 'del', text: a[i++] })
+  while (j < n) out.push({ type: 'add', text: b[j++] })
+  return out
+}
 
 function parseEnv(raw: string): EnvVar[] {
   return raw.split('\n').map((line) => {
@@ -62,6 +85,11 @@ export function EnvEditorTab({ siteId }: { siteId: number }) {
   const [error,     setError]     = useState('')
   const [search,    setSearch]    = useState('')
   const [revealed,  setRevealed]  = useState<Set<string>>(new Set())
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [versions,  setVersions]  = useState<EnvVersionMeta[]>([])
+  const [loadingV,  setLoadingV]  = useState(false)
+  const [diff,      setDiff]      = useState<{ vid: number; entries: DiffEntry[] } | null>(null)
+  const [restoring, setRestoring] = useState(false)
   const showToast = useToast()
 
   useEffect(() => {
@@ -95,6 +123,32 @@ export function EnvEditorTab({ siteId }: { siteId: number }) {
     finally { setSaving(false) }
   }
 
+  const openHistory = async () => {
+    setHistoryOpen(true); setDiff(null); setLoadingV(true)
+    try { const r = await api.config.envVersions(siteId); setVersions(r.versions) }
+    catch { showToast('Failed to load history', { error: true }) }
+    finally { setLoadingV(false) }
+  }
+
+  const viewDiff = async (vid: number) => {
+    try {
+      const r = await api.config.envVersion(siteId, vid)
+      setDiff({ vid, entries: diffLines(raw, r.content) })
+    } catch { showToast('Failed to load version', { error: true }) }
+  }
+
+  const restore = async (vid: number) => {
+    if (!confirm('Restore this .env version? Current values are replaced (a snapshot of the current file is saved first). Re-deploy to apply.')) return
+    setRestoring(true)
+    try {
+      const r = await api.config.restoreEnvVersion(siteId, vid)
+      setRaw(r.content); setVars(parseEnv(r.content))
+      showToast('.env restored — re-deploy to apply')
+      setHistoryOpen(false); setDiff(null)
+    } catch (e: unknown) { showToast(e instanceof Error ? e.message : 'Restore failed', { error: true }) }
+    finally { setRestoring(false) }
+  }
+
   const toggleReveal = (key: string) => {
     setRevealed((prev) => {
       const next = new Set(prev)
@@ -122,6 +176,7 @@ export function EnvEditorTab({ siteId }: { siteId: number }) {
       <InlineStack align="space-between" blockAlign="center">
         <Text as="h2" variant="headingMd">.env Visual Editor</Text>
         <InlineStack gap="200">
+          <Button onClick={openHistory}>History</Button>
           <Button onClick={addVar}>Add Variable</Button>
           <Button variant="primary" onClick={save} loading={saving}>Save .env</Button>
         </InlineStack>
@@ -184,6 +239,58 @@ export function EnvEditorTab({ siteId }: { siteId: number }) {
       {filtered.length === 0 && (
         <Text as="p" tone="subdued">No variables match "{search}"</Text>
       )}
+
+      <Modal
+        open={historyOpen}
+        onClose={() => { setHistoryOpen(false); setDiff(null) }}
+        title={diff ? 'Changes if restored' : '.env history'}
+        secondaryActions={diff
+          ? [{ content: '← Back', onAction: () => setDiff(null) }]
+          : [{ content: 'Close', onAction: () => { setHistoryOpen(false); setDiff(null) } }]}
+        primaryAction={diff ? { content: 'Restore this version', destructive: true, loading: restoring, onAction: () => restore(diff.vid) } : undefined}
+      >
+        <Modal.Section>
+          {loadingV ? (
+            <InlineStack align="center"><Spinner size="small" /></InlineStack>
+          ) : diff ? (
+            diff.entries.every((e) => e.type === 'same') ? (
+              <Text as="p" tone="subdued">Identical to the current .env — nothing would change.</Text>
+            ) : (
+              <div className="oc-terminal" style={{ maxHeight: 360, fontSize: 12.5 }}>
+                {diff.entries.map((e, i) => (
+                  <div key={i} style={{
+                    color: e.type === 'add' ? '#3fb950' : e.type === 'del' ? '#ff6b6b' : '#8b949e',
+                    background: e.type === 'add' ? 'rgba(63,185,80,0.08)' : e.type === 'del' ? 'rgba(255,107,107,0.08)' : 'transparent',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-all'
+                  }}>
+                    {e.type === 'add' ? '+ ' : e.type === 'del' ? '- ' : '  '}{e.text}
+                  </div>
+                ))}
+              </div>
+            )
+          ) : versions.length === 0 ? (
+            <Text as="p" tone="subdued">No saved versions yet. Each time you save the .env from here, a snapshot is kept.</Text>
+          ) : (
+            <BlockStack gap="200">
+              {versions.map((v) => (
+                <InlineStack key={v.id} align="space-between" blockAlign="center" wrap>
+                  <BlockStack gap="050">
+                    <InlineStack gap="200" blockAlign="center">
+                      <Text as="span" fontWeight="semibold">{new Date(v.createdAt).toLocaleString()}</Text>
+                      {v.note && <Badge>{v.note}</Badge>}
+                    </InlineStack>
+                    <Text as="span" variant="bodySm" tone="subdued">{v.createdBy?.email ?? 'system'}</Text>
+                  </BlockStack>
+                  <InlineStack gap="150">
+                    <Button size="micro" onClick={() => viewDiff(v.id)}>View changes</Button>
+                    <Button size="micro" tone="critical" variant="tertiary" onClick={() => restore(v.id)}>Restore</Button>
+                  </InlineStack>
+                </InlineStack>
+              ))}
+            </BlockStack>
+          )}
+        </Modal.Section>
+      </Modal>
     </BlockStack>
   )
 }

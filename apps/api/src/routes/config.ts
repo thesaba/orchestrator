@@ -3,6 +3,7 @@ import { promises as fs } from 'fs'
 import { exec as execCb } from 'child_process'
 import { promisify } from 'util'
 import crypto from 'crypto'
+import { encryptSecret, decryptSecret } from '../lib/crypto'
 
 const exec = promisify(execCb)
 
@@ -124,11 +125,78 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
 
     const { content } = request.body as { content: string }
     const envPath = `${site.rootPath}/shared/.env`
+    const uid = (request.user as { userId?: number }).userId ?? null
+
+    // On the very first panel save, snapshot the pre-existing file so the
+    // original is captured in history. All snapshotting is best-effort and
+    // never blocks the actual save.
+    try {
+      const count = await app.prisma.envVersion.count({ where: { siteId: site.id } })
+      if (count === 0) {
+        const old = await fs.readFile(envPath, 'utf-8').catch(() => '')
+        if (old.trim()) {
+          await app.prisma.envVersion.create({ data: { siteId: site.id, content: encryptSecret(old), note: 'Before first panel edit', createdById: uid } })
+        }
+      }
+    } catch { /* ignore */ }
 
     try { await fs.copyFile(envPath, `${envPath}.bak`) } catch { /* first save */ }
     await fs.writeFile(envPath, content, 'utf-8')
 
+    // Snapshot the newly-saved content, then prune to the latest 50 versions.
+    try {
+      await app.prisma.envVersion.create({ data: { siteId: site.id, content: encryptSecret(content), createdById: uid } })
+      const stale = await app.prisma.envVersion.findMany({
+        where: { siteId: site.id }, orderBy: { createdAt: 'desc' }, skip: 50, select: { id: true }
+      })
+      if (stale.length) await app.prisma.envVersion.deleteMany({ where: { id: { in: stale.map((s: { id: number }) => s.id) } } })
+    } catch { /* snapshot best-effort */ }
+
     return { ok: true, message: '.env saved. Re-deploy to apply changes.' }
+  })
+
+  // ── .env version history (diff / restore) ──────────────────────────────────
+  app.get('/:id/config/env/versions', async (request) => {
+    const siteId = Number((request.params as { id: string }).id)
+    const versions = await app.prisma.envVersion.findMany({
+      where: { siteId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, note: true, createdAt: true, createdBy: { select: { email: true } } }
+    })
+    return { versions }
+  })
+
+  app.get('/:id/config/env/versions/:vid', async (request, reply) => {
+    const siteId = Number((request.params as { id: string }).id)
+    const vid = Number((request.params as { id: string; vid: string }).vid)
+    const v = await app.prisma.envVersion.findUnique({ where: { id: vid } })
+    if (!v || v.siteId !== siteId) return reply.code(404).send({ error: 'Version not found' })
+    return { content: decryptSecret(v.content) ?? '', createdAt: v.createdAt }
+  })
+
+  app.post('/:id/config/env/versions/:vid/restore', async (request, reply) => {
+    const siteId = Number((request.params as { id: string }).id)
+    const vid = Number((request.params as { id: string; vid: string }).vid)
+    const uid = (request.user as { userId?: number }).userId ?? null
+
+    const site = await app.prisma.site.findUnique({ where: { id: siteId } })
+    if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const v = await app.prisma.envVersion.findUnique({ where: { id: vid } })
+    if (!v || v.siteId !== siteId) return reply.code(404).send({ error: 'Version not found' })
+
+    const content = decryptSecret(v.content) ?? ''
+    const envPath = `${site.rootPath}/shared/.env`
+
+    // Snapshot the current file first, so a restore is itself reversible.
+    try {
+      const cur = await fs.readFile(envPath, 'utf-8')
+      await app.prisma.envVersion.create({ data: { siteId, content: encryptSecret(cur), note: 'Before restore', createdById: uid } })
+    } catch { /* ignore */ }
+    try { await fs.copyFile(envPath, `${envPath}.bak`) } catch { /* */ }
+    await fs.writeFile(envPath, content, 'utf-8')
+
+    app.audit('env.restored', { req: request, siteId, meta: { versionId: vid } })
+    return { ok: true, content, message: '.env restored. Re-deploy to apply.' }
   })
 
   // ── PHP version ───────────────────────────────────────────────────────────
