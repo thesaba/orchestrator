@@ -31,6 +31,8 @@ export function SitesPage() {
   const [cloneName,    setCloneName]   = useState('')
   const [cloneDomain,  setCloneDomain] = useState('')
   const [cloning,      setCloning]     = useState(false)
+  const [selectedItems, setSelectedItems] = useState<string[]>([])
+  const [bulkBusy,     setBulkBusy]    = useState(false)
   const navigate = useNavigate()
   const showToast = useToast()
 
@@ -74,6 +76,48 @@ export function SitesPage() {
       showToast(err instanceof Error ? err.message : 'Clone failed', { error: true })
     } finally { setCloning(false) }
   }
+
+  // ── Bulk actions ───────────────────────────────────────────────────────────
+  // All bulk operations reuse existing per-site endpoints (deploy queues if one
+  // is already running; artisan is allowlisted), so nothing new touches the
+  // hosted sites' behaviour — it's the same actions, just fanned out.
+  const selectedSites = useMemo(
+    () => sites.filter((s) => selectedItems.includes(String(s.id))),
+    [sites, selectedItems]
+  )
+
+  const bulkDeploy = useCallback(async () => {
+    setBulkBusy(true)
+    let started = 0, queued = 0, skipped = 0
+    await Promise.all(selectedSites.map(async (s) => {
+      try {
+        const r = await api.deploy.trigger(s.id)
+        if ('queued' in r && r.queued) queued++; else started++
+      } catch { skipped++ }
+    }))
+    showToast(
+      `Deploy — ${started} started${queued ? `, ${queued} queued` : ''}${skipped ? `, ${skipped} skipped (no repo / inactive)` : ''}`,
+      { error: skipped > 0 && started === 0 && queued === 0 }
+    )
+    setSelectedItems([]); setBulkBusy(false); load()
+  }, [selectedSites, showToast, load])
+
+  const bulkClearCache = useCallback(async () => {
+    setBulkBusy(true)
+    let ok = 0, failed = 0
+    await Promise.all(selectedSites.map(async (s) => {
+      try { await api.artisan.run(s.id, 'optimize:clear'); ok++ } catch { failed++ }
+    }))
+    showToast(`Clear cache — ${ok} ok${failed ? `, ${failed} skipped/busy` : ''}`, { error: failed > 0 && ok === 0 })
+    setSelectedItems([]); setBulkBusy(false)
+  }, [selectedSites, showToast])
+
+  const bulkPin = useCallback(async (pinned: boolean) => {
+    setBulkBusy(true)
+    await Promise.all(selectedSites.map((s) => api.sites.update(s.id, { pinned }).catch(() => {})))
+    showToast(pinned ? 'Pinned' : 'Unpinned')
+    setSelectedItems([]); setBulkBusy(false); load()
+  }, [selectedSites, showToast, load])
 
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -168,6 +212,17 @@ export function SitesPage() {
         <ResourceList
           loading={loading}
           items={displayed}
+          selectable
+          selectedItems={selectedItems}
+          onSelectionChange={(sel) => setSelectedItems(sel === 'All' ? displayed.map((s) => String(s.id)) : sel)}
+          promotedBulkActions={[
+            { content: 'Deploy', onAction: bulkDeploy, disabled: bulkBusy },
+            { content: 'Clear cache', onAction: bulkClearCache, disabled: bulkBusy }
+          ]}
+          bulkActions={[
+            { content: 'Pin', onAction: () => bulkPin(true), disabled: bulkBusy },
+            { content: 'Unpin', onAction: () => bulkPin(false), disabled: bulkBusy }
+          ]}
           renderItem={(site) => {
             const tags = parseTags(site.tags)
             const lastDeploy = site.deployments[0]
