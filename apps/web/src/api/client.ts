@@ -188,6 +188,15 @@ export const api = {
     // Streamed actions (/system/run/:key/stream) are consumed directly via
     // ProvisionLog/consumeSSE with the built endpoint URL.
   },
+  tokens: {
+    list: () => request<{ tokens: AccessToken[] }>('/tokens'),
+    create: (name: string, expiresInDays?: number) =>
+      request<AccessToken & { token: string }>('/tokens', {
+        method: 'POST',
+        body: JSON.stringify(expiresInDays ? { name, expiresInDays } : { name })
+      }),
+    revoke: (id: number) => request<{ ok: true }>(`/tokens/${id}`, { method: 'DELETE' })
+  },
   dashboard: {
     get: () =>
       request<{ auto: string | null; presets: DashboardPreset[] }>('/dashboard'),
@@ -501,6 +510,15 @@ export interface SystemInfo {
   pendingUpdates: number
   rebootRequired: boolean
   ufwStatus: 'active' | 'inactive' | null
+}
+
+export interface AccessToken {
+  id: number
+  name: string
+  tokenPrefix: string
+  lastUsedAt: string | null
+  expiresAt: string | null
+  createdAt: string
 }
 
 export interface ServiceControlResult {

@@ -14,7 +14,7 @@ import {
   Tabs
 } from '@shopify/polaris'
 import { useEffect, useMemo, useState } from 'react'
-import { api, PanelSettings, s3Api, DODroplet } from '../api/client'
+import { api, PanelSettings, s3Api, DODroplet, AccessToken } from '../api/client'
 import { useToast } from '../context/toast'
 import { useAuth } from '../context/AuthContext'
 
@@ -74,6 +74,13 @@ export function SettingsPage() {
   const [doLoadingList, setDoLoadingList] = useState(false)
   const [savingDo,     setSavingDo]     = useState(false)
 
+  // Personal access tokens
+  const [tokens, setTokens]         = useState<AccessToken[]>([])
+  const [tokName, setTokName]       = useState('')
+  const [tokExpiry, setTokExpiry]   = useState('')
+  const [creatingTok, setCreatingTok] = useState(false)
+  const [newToken, setNewToken]     = useState<string | null>(null)
+
   // Which settings tab is showing.
   const [selectedTab, setSelectedTab] = useState(0)
   const tabs = useMemo(() => ([
@@ -111,7 +118,32 @@ export function SettingsPage() {
       if ((s as any).do_droplet_id)   setDoDropletId((s as any).do_droplet_id)
     }).catch(() => {}).finally(() => setLoading(false))
     api.auth.me().then((u) => setTotpEnabled(u?.totpEnabled ?? false)).catch(() => {})
+    api.tokens.list().then((r) => setTokens(r.tokens)).catch(() => {})
   }, [])
+
+  const createToken = async () => {
+    if (!tokName.trim()) return
+    setCreatingTok(true)
+    try {
+      const created = await api.tokens.create(tokName.trim(), tokExpiry ? Number(tokExpiry) : undefined)
+      setNewToken(created.token)
+      setTokens((t) => [{ id: created.id, name: created.name, tokenPrefix: created.tokenPrefix, lastUsedAt: null, expiresAt: created.expiresAt, createdAt: created.createdAt }, ...t])
+      setTokName(''); setTokExpiry('')
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Failed to create token', { error: true })
+    } finally { setCreatingTok(false) }
+  }
+
+  const revokeToken = async (id: number) => {
+    if (!confirm('Revoke this token? Any scripts using it will immediately stop working.')) return
+    try {
+      await api.tokens.revoke(id)
+      setTokens((t) => t.filter((x) => x.id !== id))
+      showToast('Token revoked')
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Failed to revoke', { error: true })
+    }
+  }
 
   const handleSaveGeneral = async () => {
     setSavingGeneral(true)
@@ -633,6 +665,79 @@ export function SettingsPage() {
               <Button tone="critical" onClick={handle2faDisable} loading={totpLoading}>
                 Disable 2FA
               </Button>
+            )}
+          </BlockStack>
+        </Card>
+      </Layout.Section>
+
+      <Layout.Section>
+        <Card>
+          <BlockStack gap="400">
+            <BlockStack gap="100">
+              <Text as="h2" variant="headingMd">Personal Access Tokens</Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Use a token to call the panel API from scripts or CI — send it as a Bearer header.
+                Tokens carry your role. The secret is shown once, on creation.
+              </Text>
+            </BlockStack>
+
+            {newToken && (
+              <Banner tone="success" onDismiss={() => setNewToken(null)}>
+                <BlockStack gap="150">
+                  <Text as="p" fontWeight="medium">Copy your new token now — it won't be shown again:</Text>
+                  <code style={{ userSelect: 'all', wordBreak: 'break-all', display: 'block', padding: '8px 10px', background: 'var(--oc-bg-secondary, #f1f1f1)', borderRadius: 6 }}>{newToken}</code>
+                  <div className="oc-settings-code">
+                    {`curl -H "Authorization: Bearer ${newToken.slice(0, 14)}…" ${settings.panel_url || 'https://your-panel'}/api/sites`}
+                  </div>
+                </BlockStack>
+              </Banner>
+            )}
+
+            <InlineStack gap="300" blockAlign="end" wrap>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <TextField label="Token name" value={tokName} onChange={setTokName} autoComplete="off" placeholder="CI deploy, laptop, …" />
+              </div>
+              <div style={{ width: 160 }}>
+                <Select
+                  label="Expires"
+                  value={tokExpiry}
+                  onChange={setTokExpiry}
+                  options={[
+                    { label: 'Never', value: '' },
+                    { label: '30 days', value: '30' },
+                    { label: '90 days', value: '90' },
+                    { label: '1 year', value: '365' }
+                  ]}
+                />
+              </div>
+              <Button variant="primary" onClick={createToken} loading={creatingTok} disabled={!tokName.trim()}>
+                Create token
+              </Button>
+            </InlineStack>
+
+            {tokens.length > 0 && (
+              <BlockStack gap="200">
+                <Divider />
+                {tokens.map((t) => {
+                  const expired = t.expiresAt && new Date(t.expiresAt).getTime() < Date.now()
+                  return (
+                    <InlineStack key={t.id} align="space-between" blockAlign="center" wrap>
+                      <BlockStack gap="050">
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text as="span" fontWeight="semibold">{t.name}</Text>
+                          <Badge>{`${t.tokenPrefix}…`}</Badge>
+                          {expired && <Badge tone="critical">expired</Badge>}
+                        </InlineStack>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {t.lastUsedAt ? `Last used ${new Date(t.lastUsedAt).toLocaleString()}` : 'Never used'}
+                          {t.expiresAt ? ` · expires ${new Date(t.expiresAt).toLocaleDateString()}` : ' · no expiry'}
+                        </Text>
+                      </BlockStack>
+                      <Button size="micro" tone="critical" variant="tertiary" onClick={() => revokeToken(t.id)}>Revoke</Button>
+                    </InlineStack>
+                  )
+                })}
+              </BlockStack>
             )}
           </BlockStack>
         </Card>

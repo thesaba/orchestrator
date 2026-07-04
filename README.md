@@ -110,6 +110,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🎯 **Per-site** access grants
 - 🧾 Full **audit log** of privileged actions
 - 🔒 **Secrets encrypted at rest** (AES-256-GCM)
+- 🔑 **Personal Access Tokens** — scriptable panel API for CI/curl (hashed, scoped to your role, revocable)
 
 ### 🧠 Productivity
 - 🔎 **Search, sort & tag-filter** across your sites

@@ -41,6 +41,7 @@ import { directoryRoutes } from './routes/directory'
 import { serverRoutes } from './routes/server'
 import { dashboardRoutes } from './routes/dashboard'
 import { systemRoutes } from './routes/system'
+import { tokensRoutes } from './routes/tokens'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 import { startSslMonitor } from './lib/ssl-monitor'
 import { startMetricsMonitor } from './lib/metrics-monitor'
@@ -117,6 +118,7 @@ async function start() {
   await app.register(serverRoutes,      { prefix: '/api/server' })
   await app.register(dashboardRoutes,   { prefix: '/api/dashboard' })
   await app.register(systemRoutes,      { prefix: '/api/system' })
+  await app.register(tokensRoutes,      { prefix: '/api/tokens' })
 
   // Loopback-only, shared-secret-protected — used by the phpMyAdmin signon
   // bridge to redeem a one-time token for real DB credentials. See

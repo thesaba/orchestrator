@@ -27,6 +27,23 @@ model User {
   calendarEvents    CalendarEvent[]
   calendarAttending CalendarEventAttendee[]
   dashboardPresets  DashboardPreset[]
+  accessTokens      PersonalAccessToken[]
+}
+
+// Personal Access Token for scripting the panel API (CI, curl). Only a SHA-256
+// hash of the token is stored — the plaintext is shown once at creation and can
+// never be recovered. Tokens carry the owning user's role (checked the same way
+// as a JWT session).
+model PersonalAccessToken {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  tokenHash   String    @unique
+  tokenPrefix String    // first chars, for display only ("orch_1a2b…")
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
 }
 
 // Per-user monitoring dashboard layout. `name` "__auto__" holds the live
