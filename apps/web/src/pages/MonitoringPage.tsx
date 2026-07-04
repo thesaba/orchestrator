@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, Site, ServiceStatus } from '../api/client'
 import { SystemStatsCard }    from '../components/SystemStatsCard'
 import { MetricsHistoryCard } from '../components/MetricsHistoryCard'
+import { TopProcessesCard }   from '../components/TopProcessesCard'
 import { ServiceControlCard } from '../components/ServiceControlCard'
 import { LogTailViewer }      from '../components/LogTailViewer'
 import { ActivityLog }        from '../components/ActivityLog'
@@ -99,7 +100,12 @@ export function MonitoringPage() {
           ))
         )}
 
-        {/* ── Row 3: Services — full width ────────────────────────────── */}
+        {/* ── Row 3: Top resource-consuming services ──────────────────── */}
+        <Layout.Section>
+          <TopProcessesCard />
+        </Layout.Section>
+
+        {/* ── Row 3b: Services — full width ───────────────────────────── */}
         <Layout.Section>
           <ServiceControlCard services={services} onRefresh={refreshServices} />
         </Layout.Section>

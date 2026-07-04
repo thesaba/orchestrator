@@ -179,7 +179,9 @@ export const api = {
         body: JSON.stringify({ action })
       }),
     history: (hours = 24) =>
-      request<MetricsHistory>(`/monitor/history?hours=${hours}`)
+      request<MetricsHistory>(`/monitor/history?hours=${hours}`),
+    processes: (limit = 8) =>
+      request<ProcessStats>(`/monitor/processes?limit=${limit}`)
   },
   server: {
     status: () => request<ServerStatus>('/server/status'),
@@ -453,6 +455,20 @@ export interface ServiceStatus {
   key: string
   name: string
   status: 'active' | 'inactive'
+}
+
+export interface ProcessService {
+  name: string
+  cpuPercent: number
+  memPercent: number
+  rssBytes: number
+  count: number
+}
+
+export interface ProcessStats {
+  cores: number
+  services: ProcessService[]
+  capturedAt: string
 }
 
 export interface ServiceControlResult {

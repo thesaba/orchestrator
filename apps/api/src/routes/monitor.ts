@@ -43,6 +43,72 @@ async function getSwapStats() {
   }
 }
 
+// Friendly name for a raw `comm` (process name), so grouped rows read as
+// "services" rather than raw binaries. Falls back to the raw name.
+function prettyProcName(comm: string): string {
+  const c = comm.toLowerCase()
+  if (c.includes('fpm')) return 'PHP-FPM'
+  if (c === 'mysqld' || c === 'mariadbd') return 'MySQL'
+  if (c.startsWith('nginx')) return 'Nginx'
+  if (c.startsWith('redis')) return 'Redis'
+  if (c.startsWith('php')) return 'PHP'
+  if (c.includes('node')) return 'Node.js'
+  if (c.includes('python')) return 'Python'
+  if (c.includes('supervisor')) return 'Supervisor'
+  return comm
+}
+
+export interface ProcessService {
+  name: string
+  cpuPercent: number
+  memPercent: number
+  rssBytes: number
+  count: number
+}
+
+// Top resource-consuming processes, aggregated by command ("service"). Uses
+// GNU `ps` (Linux / production). On platforms without those flags (e.g. a macOS
+// dev machine) it returns an empty list rather than throwing. Multi-worker
+// services (php-fpm pools, nginx workers) are summed, so cpuPercent can exceed
+// 100 on multi-core boxes — `cores` is returned for context.
+export async function getProcessStats(limit = 8): Promise<{ cores: number; services: ProcessService[]; capturedAt: string }> {
+  const cores = os.cpus().length
+  try {
+    const { stdout } = await exec(
+      "ps -eo pid,%cpu,%mem,rss,comm --sort=-%cpu --no-headers 2>/dev/null | head -n 300"
+    )
+    const groups = new Map<string, ProcessService>()
+    for (const line of stdout.split('\n')) {
+      const t = line.trim()
+      if (!t) continue
+      // pid %cpu %mem rss comm
+      const m = t.match(/^(\d+)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s+(.+)$/)
+      if (!m) continue
+      const cpu = parseFloat(m[2]) || 0
+      const mem = parseFloat(m[3]) || 0
+      const rss = (parseInt(m[4], 10) || 0) * 1024 // ps reports rss in KiB
+      const name = prettyProcName(m[5])
+      const g = groups.get(name) ?? { name, cpuPercent: 0, memPercent: 0, rssBytes: 0, count: 0 }
+      g.cpuPercent += cpu
+      g.memPercent += mem
+      g.rssBytes += rss
+      g.count += 1
+      groups.set(name, g)
+    }
+    const services = [...groups.values()]
+      .map((g) => ({
+        ...g,
+        cpuPercent: Math.round(g.cpuPercent * 10) / 10,
+        memPercent: Math.round(g.memPercent * 10) / 10
+      }))
+      .sort((a, b) => b.cpuPercent - a.cpuPercent)
+      .slice(0, limit)
+    return { cores, services, capturedAt: new Date().toISOString() }
+  } catch {
+    return { cores, services: [], capturedAt: new Date().toISOString() }
+  }
+}
+
 async function checkService(name: string): Promise<'active' | 'inactive'> {
   try {
     await exec(`systemctl is-active --quiet ${name}`)
@@ -132,6 +198,20 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
       select: { cpuPercent: true, ramPercent: true, diskPercent: true, checkedAt: true }
     })
     return { hours, samples }
+  })
+
+  // ── GET /processes — top resource-consuming services (grouped by command) ──
+  app.get('/processes', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: { limit: { type: 'integer', minimum: 1, maximum: 25 } },
+        additionalProperties: false
+      }
+    }
+  }, async (request) => {
+    const { limit = 8 } = request.query as { limit?: number }
+    return getProcessStats(limit)
   })
 
   // ── GET /services ────────────────────────────────────────────────────────
