@@ -39,6 +39,7 @@ import { notesRoutes } from './routes/notes'
 import { calendarRoutes } from './routes/calendar'
 import { directoryRoutes } from './routes/directory'
 import { serverRoutes } from './routes/server'
+import { serversRoutes } from './routes/servers'
 import { dashboardRoutes } from './routes/dashboard'
 import { systemRoutes } from './routes/system'
 import { tokensRoutes } from './routes/tokens'
@@ -57,6 +58,7 @@ import { startAlertsMonitor } from './lib/alerts-monitor'
 import { startLogCollector } from './lib/log-collector'
 import { startSslMonitor } from './lib/ssl-monitor'
 import { startMetricsMonitor } from './lib/metrics-monitor'
+import { seedLocalServer } from './lib/servers'
 
 const app = Fastify({
   logger: {
@@ -128,6 +130,7 @@ async function start() {
   await app.register(calendarRoutes,    { prefix: '/api/calendar' })
   await app.register(directoryRoutes,   { prefix: '/api/directory' })
   await app.register(serverRoutes,      { prefix: '/api/server' })
+  await app.register(serversRoutes,     { prefix: '/api/servers' })
   await app.register(dashboardRoutes,   { prefix: '/api/dashboard' })
   await app.register(systemRoutes,      { prefix: '/api/system' })
   await app.register(tokensRoutes,      { prefix: '/api/tokens' })
@@ -156,6 +159,10 @@ async function start() {
   // failed instead of leaving them stuck forever, and unblock anything
   // queued behind them.
   await reconcileOrphanedDeployments(app)
+
+  // Ensure the local-server row exists (multi-server foundation). Idempotent;
+  // pre-existing sites keep serverId=null → local, so nothing changes for them.
+  await seedLocalServer(app.prisma)
 
   // Start background monitors after the server is listening
   startUptimeMonitor(app.prisma)

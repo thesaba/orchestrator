@@ -80,10 +80,39 @@ model DashboardPreset {
   @@unique([userId, name])
 }
 
+// A managed server the panel can operate. A single self-managed "local" row
+// (kind="local") is seeded automatically and represents the host the panel runs
+// on — its execution path is the original in-process/local-shell behaviour and
+// is never changed. Additional rows (kind="remote") are reached over SSH.
+// SSH credentials are encrypted at rest. All existing sites have serverId=null,
+// which resolves to the local server, so nothing about them changes.
+model Server {
+  id            Int      @id @default(autoincrement())
+  name          String                          // display label
+  kind          String   @default("remote")     // "local" | "remote"
+  host          String?                          // hostname/IP (null for local)
+  port          Int      @default(22)
+  sshUser       String   @default("root")
+  sshKey        String?                          // encrypted private key (PEM), remote only
+  sshKeyFingerprint String?                      // for display (not the key itself)
+  scriptsSynced Boolean  @default(false)         // scripts/ dir copied to remote yet
+  status        String   @default("unknown")     // unknown | online | offline
+  lastSeenAt    DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  sites         Site[]
+  metricSamples MetricSample[]
+}
+
 model Site {
   id              Int            @id @default(autoincrement())
   name            String
   domain          String         @unique
+  // Which server this site lives on. null = the local server (default), so all
+  // pre-existing sites keep their exact current local execution path.
+  serverId        Int?
+  server          Server?        @relation(fields: [serverId], references: [id])
   phpVersion      String         @default("8.2")
   dbName          String?
   dbUser          String?
@@ -252,12 +281,16 @@ model UptimeCheck {
 // Powers the historical CPU / RAM / disk charts on the Monitoring page.
 model MetricSample {
   id          Int      @id @default(autoincrement())
+  // null = the local server (keeps all historical rows valid without backfill).
+  serverId    Int?
+  server      Server?  @relation(fields: [serverId], references: [id], onDelete: Cascade)
   cpuPercent  Int
   ramPercent  Int
   diskPercent Int
   checkedAt   DateTime @default(now())
 
   @@index([checkedAt])
+  @@index([serverId, checkedAt])
 }
 
 model AuditLog {
