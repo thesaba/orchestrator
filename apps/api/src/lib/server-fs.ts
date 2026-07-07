@@ -37,6 +37,13 @@ export async function writeFileOn(ctx: ServerCtx, filePath: string, content: str
   await execOn(ctx, 'bash', ['-lc', script])
 }
 
+/** Read a file's raw bytes as base64 (for binary content). */
+export async function readFileBase64On(ctx: ServerCtx, filePath: string): Promise<string> {
+  if (isLocal(ctx)) return fs.readFile(filePath, 'base64')
+  const { stdout } = await execOn(ctx, 'bash', ['-lc', `base64 -w0 ${shellEscape(filePath)}`], { maxBuffer: 16 * 1024 * 1024 })
+  return stdout.trim()
+}
+
 export async function copyFileOn(ctx: ServerCtx, src: string, dst: string): Promise<void> {
   if (isLocal(ctx)) { await fs.copyFile(src, dst); return }
   await execOn(ctx, 'bash', ['-lc', `cp -f ${shellEscape(src)} ${shellEscape(dst)}`])
@@ -78,6 +85,29 @@ export async function readdirOn(ctx: ServerCtx, dirPath: string): Promise<string
   if (isLocal(ctx)) return fs.readdir(dirPath)
   const { stdout } = await execOn(ctx, 'bash', ['-lc', `ls -1 ${shellEscape(dirPath)}`])
   return stdout.split('\n').map((s) => s.trim()).filter(Boolean)
+}
+
+export interface RemoteDirEntry { name: string; kind: string; size: number; mtimeMs: number; octPerms: string; owner: string; group: string }
+
+/**
+ * List a directory on a remote server with rich metadata in ONE round-trip.
+ * (Local callers use node fs directly.) Returns [] on error.
+ */
+export async function remoteListDir(ctx: ServerCtx, dirPath: string): Promise<RemoteDirEntry[]> {
+  if (isLocal(ctx)) return []
+  const script =
+    `cd ${shellEscape(dirPath)} 2>/dev/null || exit 0; ` +
+    `for n in * .*; do [ "$n" = "." ] || [ "$n" = ".." ] && continue; [ -e "$n" ] || [ -L "$n" ] || continue; ` +
+    `stat -c '%n|%F|%s|%Y|%a|%U|%G' "$n" 2>/dev/null; done`
+  const { stdout } = await execOn(ctx, 'bash', ['-lc', script]).catch(() => ({ stdout: '' }))
+  const out: RemoteDirEntry[] = []
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) continue
+    const [name, kind, size, mtime, octPerms, owner, group] = line.split('|')
+    if (!name) continue
+    out.push({ name, kind: kind ?? '', size: parseInt(size, 10) || 0, mtimeMs: (parseInt(mtime, 10) || 0) * 1000, octPerms: octPerms ?? '', owner: owner ?? '', group: group ?? '' })
+  }
+  return out
 }
 
 /** chown -R on the remote (or fs equivalent locally is skipped — provisioning owns perms). */
