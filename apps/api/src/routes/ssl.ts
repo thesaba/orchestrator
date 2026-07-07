@@ -39,11 +39,20 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'Site must be active before issuing SSL.' })
     }
 
-    // Get admin email from settings
+    // Get admin email from settings. Let's Encrypt rejects bogus addresses
+    // (e.g. the old `admin@localhost` default), so only pass --email for a
+    // genuinely valid address; otherwise register without one.
     const emailSetting = await app.prisma.setting
       .findUnique({ where: { key: 'notify_email' } })
       .catch(() => null)
-    const email = emailSetting?.value?.trim() || 'admin@localhost'
+    const email = emailSetting?.value?.trim() || ''
+    // Basic RFC-ish check + reject non-public TLDs (localhost, .local, .internal).
+    const validEmail =
+      /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) &&
+      !/@(localhost|.*\.(local|internal|test|invalid))$/i.test(email)
+    const acctArgs = validEmail
+      ? ['--email', email]
+      : ['--register-unsafely-without-email']
 
     const emitter = new EventEmitter()
     emitter.setMaxListeners(10)
@@ -57,7 +66,7 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
       '-d', site.domain,
       '--non-interactive',
       '--agree-tos',
-      '--email', email,
+      ...acctArgs,
       '--redirect'
     ], { tty: !isLocal(ctx) })
 
