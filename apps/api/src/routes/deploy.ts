@@ -12,6 +12,10 @@ import { createNotification } from '../lib/notifications'
 import { decryptSecret, encryptSecret } from '../lib/crypto'
 import { isValidGitUrl, execFileP } from '../lib/exec'
 import { parseTestSummary } from '../lib/test-parse'
+import { spawnOn, execOn, isLocal, ServerCtx } from '../lib/server-exec'
+import { serverCtxById, serverCtxForSite } from '../lib/servers'
+import { ensureScriptsSynced } from '../lib/server-sync'
+import { shellEscape } from '../lib/ssh'
 
 const exec = promisify(execCb)
 
@@ -90,6 +94,9 @@ export async function reconcileOrphanedDeployments(app: FastifyInstance) {
         gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
         healthCheck: site.healthCheck,
         healthCheckUrl: site.healthCheckUrl,
+        serverId: site.serverId,
+        preDeploy: site.preDeploy,
+        postDeploy: site.postDeploy,
         ...siteTestOpts(site)
       }).catch(() => {/* best effort */})
     }
@@ -114,16 +121,36 @@ function buildAuthenticatedUrl(repoUrl: string, token?: string | null): string {
   } catch { return repoUrl }
 }
 
-// Write a hook script to disk (called before runDeploy so deploy.sh can source it)
-async function writeHook(rootPath: string, name: string, content: string | null) {
+// Write a hook script (called before runDeploy so deploy.sh can source it).
+// Server-aware: local writes with fs (unchanged); remote writes over SSH by
+// base64-piping the content so no shell-escaping of the body is needed.
+async function writeHookOn(ctx: ServerCtx, rootPath: string, name: string, content: string | null) {
   const dir = path.join(rootPath, 'hooks')
   const file = path.join(dir, name)
-  if (content?.trim()) {
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(file, `#!/usr/bin/env bash\nset -euo pipefail\n\n${content}\n`, { mode: 0o755 })
-  } else {
-    await fs.unlink(file).catch(() => {/* not present — ok */})
+  const body = content?.trim() ? `#!/usr/bin/env bash\nset -euo pipefail\n\n${content}\n` : null
+
+  if (isLocal(ctx)) {
+    if (body) {
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(file, body, { mode: 0o755 })
+    } else {
+      await fs.unlink(file).catch(() => {/* not present — ok */})
+    }
+    return
   }
+  // Remote.
+  if (body) {
+    const b64 = Buffer.from(body, 'utf8').toString('base64')
+    const script = `mkdir -p ${shellEscape(dir)} && printf %s ${shellEscape(b64)} | base64 -d > ${shellEscape(file)} && chmod 755 ${shellEscape(file)}`
+    await execOn(ctx, 'bash', ['-lc', script])
+  } else {
+    await execOn(ctx, 'bash', ['-lc', `rm -f ${shellEscape(file)}`]).catch(() => {})
+  }
+}
+
+// Back-compat wrapper for the local-only call sites (kept for clarity).
+async function writeHook(rootPath: string, name: string, content: string | null) {
+  return writeHookOn(null, rootPath, name, content)
 }
 
 // HTTP health check — returns true if site responds with < 500
@@ -187,11 +214,26 @@ export async function runDeploy(
     testUseSqlite?: boolean
     skipTests?: boolean // one-off emergency override (bypasses runTests)
     ref?: string        // deploy a specific tag/branch/commit instead of branch HEAD
+    serverId?: number | null // which server to deploy on (null/undefined = local)
+    preDeploy?: string | null
+    postDeploy?: string | null
   }
 ): Promise<number> {
   if (deployEmitters.has(siteId)) {
     throw Object.assign(new Error('Deploy already in progress'), { code: 409 })
   }
+
+  // Resolve the target server. null → local (original path). For a remote server
+  // we make sure the bash scripts are present on it first, then stream the same
+  // deploy.sh over SSH.
+  const serverCtx = await serverCtxById(app.prisma, opts.serverId ?? null)
+  const localServer = isLocal(serverCtx)
+  const synced = await ensureScriptsSynced(app.prisma, opts.serverId ?? null)
+  const deployScript = `${synced.scriptsDir}/deploy.sh`
+
+  // Hooks live under <rootPath>/hooks on whichever host the deploy runs on.
+  await writeHookOn(serverCtx, opts.rootPath, 'pre-deploy.sh', opts.preDeploy ?? null)
+  await writeHookOn(serverCtx, opts.rootPath, 'post-deploy.sh', opts.postDeploy ?? null)
 
   const deployment = await app.prisma.deployment.create({
     data: { siteId, branch: opts.branch, status: 'running' }
@@ -221,11 +263,29 @@ export async function runDeploy(
       }
     : {}
 
-  const proc = spawn(
-    'bash',
-    [path.join(scriptsDir(), 'deploy.sh'), opts.rootPath, opts.branch, opts.phpVersion],
-    { env: { ...process.env, REPO_URL: authenticatedRepoUrl, ...testEnv, ...(opts.ref ? { REF: opts.ref } : {}) }, detached: true } // detached so we can kill the whole process group (git/composer/npm children), not just bash
-  )
+  const envMap: Record<string, string> = {
+    REPO_URL: authenticatedRepoUrl, ...testEnv, ...(opts.ref ? { REF: opts.ref } : {})
+  }
+
+  let proc
+  if (localServer) {
+    // Local: spawn bash directly. env goes in the process environment (not argv),
+    // so the git token never appears in `ps`. detached → we can kill the whole
+    // process group (git/composer/npm children). Identical to the original path.
+    proc = await spawnOn(serverCtx, 'bash', [deployScript, opts.rootPath, opts.branch, opts.phpVersion], { env: envMap, detached: true })
+  } else {
+    // Remote: to keep secrets (REPO_URL with token) out of the remote `ps` and
+    // the ssh argv, write the env to a 0600 file on the server, source+delete it,
+    // then exec deploy.sh. Only the escaped env FILE briefly holds the token.
+    const envContent = Object.entries(envMap).map(([k, v]) => `export ${k}=${shellEscape(v)}`).join('\n') + '\n'
+    const b64 = Buffer.from(envContent, 'utf8').toString('base64')
+    const envFile = `/tmp/orch-env-${deployment.id}`
+    await execOn(serverCtx, 'bash', ['-lc', `printf %s ${shellEscape(b64)} | base64 -d > ${shellEscape(envFile)} && chmod 600 ${shellEscape(envFile)}`])
+    const runScript =
+      `set -a; . ${shellEscape(envFile)}; rm -f ${shellEscape(envFile)}; ` +
+      `exec bash ${shellEscape(deployScript)} ${shellEscape(opts.rootPath)} ${shellEscape(opts.branch)} ${shellEscape(opts.phpVersion)}`
+    proc = await spawnOn(serverCtx, 'bash', ['-lc', runScript], { tty: true })
+  }
   deployProcs.set(siteId, proc)
 
   const startedAt = Date.now()
@@ -293,22 +353,38 @@ export async function runDeploy(
         addLine(`\n[health] ✗ Health check failed — initiating auto-rollback...\n`)
         status = 'failed'
 
-        // Rollback to the release that was just made (current symlink now points to it)
+        // Rollback to the previous release (current symlink now points to the
+        // just-made one). Runs on whichever host the site lives on.
         try {
-          const currentPath = path.join(opts.rootPath, 'current')
-          const releasePath = await fs.readlink(currentPath)
-          const releaseName = path.basename(releasePath)
-          // Find previous release
-          const releasesDir = path.join(opts.rootPath, 'releases')
-          const entries = (await fs.readdir(releasesDir)).sort().reverse()
-          const prevRelease = entries.find((e) => e !== releaseName)
-          if (prevRelease) {
-            const prevPath = path.join(releasesDir, prevRelease)
-            await exec(`ln -sfn "${prevPath}" "${currentPath}"`)
-            addLine(`[health] ✓ Rolled back to release ${prevRelease}\n`)
-            app.audit('deploy.health_rollback', { siteId, meta: { domain: opts.domain, release: prevRelease } })
+          if (localServer) {
+            const currentPath = path.join(opts.rootPath, 'current')
+            const releasePath = await fs.readlink(currentPath)
+            const releaseName = path.basename(releasePath)
+            const releasesDir = path.join(opts.rootPath, 'releases')
+            const entries = (await fs.readdir(releasesDir)).sort().reverse()
+            const prevRelease = entries.find((e) => e !== releaseName)
+            if (prevRelease) {
+              const prevPath = path.join(releasesDir, prevRelease)
+              await exec(`ln -sfn "${prevPath}" "${currentPath}"`)
+              addLine(`[health] ✓ Rolled back to release ${prevRelease}\n`)
+              app.audit('deploy.health_rollback', { siteId, meta: { domain: opts.domain, release: prevRelease } })
+            } else {
+              addLine(`[health] ⚠ No previous release to roll back to\n`)
+            }
           } else {
-            addLine(`[health] ⚠ No previous release to roll back to\n`)
+            // Remote: do the same swap in one SSH command.
+            const rb =
+              `cd ${shellEscape(opts.rootPath)} && cur=$(readlink current 2>/dev/null) && rel=$(basename "$cur") && ` +
+              `prev=$(ls -1 releases 2>/dev/null | sort -r | grep -vx "$rel" | head -1); ` +
+              `if [ -n "$prev" ]; then ln -sfn "releases/$prev" current && echo "ROLLED:$prev"; else echo "NOPREV"; fi`
+            const { stdout } = await execOn(serverCtx, 'bash', ['-lc', rb])
+            const mm = stdout.match(/ROLLED:(.+)/)
+            if (mm) {
+              addLine(`[health] ✓ Rolled back to release ${mm[1].trim()}\n`)
+              app.audit('deploy.health_rollback', { siteId, meta: { domain: opts.domain, release: mm[1].trim() } })
+            } else {
+              addLine(`[health] ⚠ No previous release to roll back to\n`)
+            }
           }
         } catch (rbErr: unknown) {
           addLine(`[health] ✗ Auto-rollback failed: ${(rbErr as Error).message}\n`)
@@ -380,6 +456,9 @@ export async function runDeploy(
             gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
             healthCheck: site.healthCheck,
             healthCheckUrl: site.healthCheckUrl,
+            serverId: site.serverId,
+            preDeploy: site.preDeploy,
+            postDeploy: site.postDeploy,
             ...siteTestOpts(site)
           })
         } catch { /* queued deploy failed to start — ignore */ }
@@ -493,9 +572,7 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     if (!site.repoUrl) return reply.code(400).send({ error: 'No repository URL configured' })
     if (site.status !== 'active') return reply.code(400).send({ error: 'Site is not active' })
 
-    // Write hook scripts before starting deploy
-    await writeHook(site.rootPath, 'pre-deploy.sh',  site.preDeploy)
-    await writeHook(site.rootPath, 'post-deploy.sh', site.postDeploy)
+    // Hook scripts are written inside runDeploy on the correct (local/remote) host.
 
     // If deploy already running → queue it instead of rejecting
     if (deployEmitters.has(siteId)) {
@@ -513,6 +590,9 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
         healthCheck: site.healthCheck,
         healthCheckUrl: site.healthCheckUrl,
+        serverId: site.serverId,
+        preDeploy: site.preDeploy,
+        postDeploy: site.postDeploy,
         ...siteTestOpts(site),
         skipTests,
         ref
@@ -737,10 +817,12 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
       }
     })
 
-    // Write hook scripts immediately so they're on disk for the next deploy
+    // Write hook scripts immediately so they're on disk (local or remote host)
+    // for the next deploy.
     if (preDeploy !== undefined || postDeploy !== undefined) {
-      await writeHook(site.rootPath, 'pre-deploy.sh',  site.preDeploy)
-      await writeHook(site.rootPath, 'post-deploy.sh', site.postDeploy)
+      const ctx = await serverCtxForSite(app.prisma, site)
+      await writeHookOn(ctx, site.rootPath, 'pre-deploy.sh',  site.preDeploy)
+      await writeHookOn(ctx, site.rootPath, 'post-deploy.sh', site.postDeploy)
     }
 
     const { gitToken: _omit, ...safeSite } = site
@@ -823,9 +905,7 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     if (!site.repoUrl) return reply.code(400).send({ error: 'No repository URL configured' })
     if (site.status !== 'active') return reply.code(400).send({ error: 'Site is not active' })
 
-    await writeHook(site.rootPath, 'pre-deploy.sh',  site.preDeploy)
-    await writeHook(site.rootPath, 'post-deploy.sh', site.postDeploy)
-
+    // Hook scripts are written inside runDeploy on the correct (local/remote) host.
     if (deployEmitters.has(siteId)) {
       await app.prisma.site.update({ where: { id: siteId }, data: { deployQueued: true } })
       return reply.code(202).send({ ok: true, queued: true, message: 'Deploy queued — will start automatically after the current one finishes.' })
@@ -841,6 +921,9 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         gitToken: site.gitToken ? decryptSecret(site.gitToken) : null,
         healthCheck: site.healthCheck,
         healthCheckUrl: site.healthCheckUrl,
+        serverId: site.serverId,
+        preDeploy: site.preDeploy,
+        postDeploy: site.postDeploy,
         ...siteTestOpts(site)
       })
       return reply.code(202).send({ ok: true, deploymentId })

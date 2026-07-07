@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, execFile } from 'child_process'
+import { spawn, ChildProcessWithoutNullStreams, execFile } from 'child_process'
 import { promisify } from 'util'
 import { run, RunOpts } from './exec'
 import { RemoteServer, sshBaseArgs, buildRemoteCommand, writeKeyFile, cleanupKeyFile } from './ssh'
@@ -73,7 +73,7 @@ export async function spawnOn(
   file: string,
   args: string[],
   opts: SpawnOnOpts = {}
-): Promise<ChildProcess> {
+): Promise<ChildProcessWithoutNullStreams> {
   if (isLocal(server)) {
     return spawn(file, args, {
       cwd: opts.cwd,

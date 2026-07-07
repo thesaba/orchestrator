@@ -1,8 +1,10 @@
 import { FastifyPluginAsync } from 'fastify'
-import { spawn } from 'child_process'
 import { EventEmitter } from 'events'
 import path from 'path'
 import { getCloudflareCreds, isCloudflareConfigured, upsertARecord } from '../lib/cloudflare'
+import { spawnOn } from '../lib/server-exec'
+import { serverCtxById } from '../lib/servers'
+import { ensureScriptsSynced } from '../lib/server-sync'
 
 interface LogBuffer {
   lines: string[]
@@ -67,13 +69,26 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
       data: { status: 'provisioning', dbName, dbUser }
     })
 
+    // Resolve the target server (null → local). For a remote server, make sure
+    // the bash scripts are present on it first, then run provision.sh over SSH.
+    let serverCtx, scriptDir: string, localServer: boolean
+    try {
+      serverCtx = await serverCtxById(app.prisma, (site as any).serverId ?? null)
+      const synced = await ensureScriptsSynced(app.prisma, (site as any).serverId ?? null)
+      scriptDir = synced.scriptsDir
+      localServer = synced.local
+    } catch (e: unknown) {
+      await app.prisma.site.update({ where: { id: siteId }, data: { status: 'pending' } })
+      return reply.code(502).send({ error: `Could not reach target server: ${(e as Error).message}` })
+    }
+
     const emitter = new EventEmitter()
     emitter.setMaxListeners(20)
     emitters.set(siteId, emitter)
     logBuffers.set(siteId, { lines: [] })
 
-    const script = path.join(resolvedScriptsDir(), 'provision.sh')
-    const proc = spawn('bash', [script, site.domain, site.phpVersion, dbName, dbUser, dbPassword, template])
+    const script = localServer ? path.join(resolvedScriptsDir(), 'provision.sh') : `${scriptDir}/provision.sh`
+    const proc = await spawnOn(serverCtx, 'bash', [script, site.domain, site.phpVersion, dbName, dbUser, dbPassword, template], { tty: !localServer })
 
     const addLine = (raw: string) => {
       const buf = logBuffers.get(siteId)!
