@@ -129,7 +129,7 @@ export function ServersPage() {
 
   return (
     <Page
-      title="Servers"
+      title="Infrastructure"
       subtitle="Manage the servers this panel operates. New sites can be placed on any server; existing sites stay on the local server."
       primaryAction={{ content: 'Add server', onAction: openAdd }}
     >
