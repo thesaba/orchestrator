@@ -1,4 +1,4 @@
-import { execFileP } from './exec'
+import { execOn, ServerCtx } from './server-exec'
 
 export interface CertInfo {
   active: boolean
@@ -8,13 +8,13 @@ export interface CertInfo {
 }
 
 /**
- * Read a domain's certificate status from Certbot. Never throws — returns an
- * inactive result on any error. Uses execFile (argv, no shell); the domain is
- * validated on site creation, this keeps it inert regardless.
+ * Read a domain's certificate status from Certbot on the site's server (local →
+ * in-process, remote → over SSH). Never throws — returns an inactive result on
+ * any error. The domain is validated on site creation, keeping it inert.
  */
-export async function getCertInfo(domain: string): Promise<CertInfo> {
+export async function getCertInfo(domain: string, ctx: ServerCtx = null): Promise<CertInfo> {
   try {
-    const { stdout } = await execFileP('certbot', ['certificates', '--cert-name', domain])
+    const { stdout } = await execOn(ctx, 'certbot', ['certificates', '--cert-name', domain])
       .catch((e: any) => ({ stdout: e.stdout ?? '' }))
 
     const expiryMatch = stdout.match(/Expiry Date:\s+(.+?)\s+\(/)

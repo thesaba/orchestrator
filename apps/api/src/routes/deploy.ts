@@ -761,9 +761,11 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
 
       if (renameOnDisk !== false) {
         try {
-          const script = path.join(scriptsDir(), 'rename-domain.sh')
-          const { stdout, stderr } = await exec(
-            `bash "${script}" "${existing.domain}" "${domain}"`,
+          const ctx = await serverCtxForSite(app.prisma, existing)
+          const synced = await ensureScriptsSynced(app.prisma, existing.serverId)
+          const script = `${synced.scriptsDir}/rename-domain.sh`
+          const { stdout, stderr } = await execOn(
+            ctx, 'bash', [script, existing.domain, domain],
             { timeout: 30_000 }
           )
           renameLog = (stdout + stderr).trim()
@@ -781,9 +783,11 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     // ── Enable / disable serving ───────────────────────────────────────────
     if (disabled !== undefined && disabled !== existing.disabled) {
       try {
-        const script = path.join(scriptsDir(), 'toggle-site.sh')
+        const ctx = await serverCtxForSite(app.prisma, existing)
+        const synced = await ensureScriptsSynced(app.prisma, existing.serverId)
+        const script = `${synced.scriptsDir}/toggle-site.sh`
         const toggleDomain = domain ?? existing.domain
-        await exec(`bash "${script}" "${toggleDomain}" "${disabled ? 'off' : 'on'}"`, { timeout: 15_000 })
+        await execOn(ctx, 'bash', [script, toggleDomain, disabled ? 'off' : 'on'], { timeout: 15_000 })
         app.audit(disabled ? 'site.disabled' : 'site.enabled', { siteId, meta: { domain: toggleDomain } })
       } catch (err: unknown) {
         const e = err as { stdout?: string; stderr?: string; message?: string }
@@ -844,23 +848,41 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const releasesDir = path.join(site.rootPath, 'releases')
+    const currentLink = path.join(site.rootPath, 'current')
+
+    if (isLocal(ctx)) {
+      try {
+        const entries = await fs.readdir(releasesDir)
+        let currentRelease = ''
+        try { currentRelease = path.basename(await fs.readlink(currentLink)) } catch { /* no symlink */ }
+
+        const releases = (
+          await Promise.all(
+            entries.map(async (name) => {
+              const stat = await fs.stat(path.join(releasesDir, name)).catch(() => null)
+              if (!stat?.isDirectory()) return null
+              return { name, isCurrent: name === currentRelease, createdAt: stat.birthtime.toISOString() }
+            })
+          )
+        ).filter(Boolean).sort((a, b) => b!.name.localeCompare(a!.name))
+
+        return { releases, current: currentRelease }
+      } catch {
+        return { releases: [], current: '' }
+      }
+    }
+
+    // Remote: list release dirs + mtime in one SSH round-trip.
     try {
-      const entries = await fs.readdir(releasesDir)
-      let currentRelease = ''
-      try { currentRelease = path.basename(await fs.readlink(path.join(site.rootPath, 'current'))) } catch { /* no symlink */ }
-
-      const releases = (
-        await Promise.all(
-          entries.map(async (name) => {
-            const stat = await fs.stat(path.join(releasesDir, name)).catch(() => null)
-            if (!stat?.isDirectory()) return null
-            return { name, isCurrent: name === currentRelease, createdAt: stat.birthtime.toISOString() }
-          })
-        )
-      ).filter(Boolean).sort((a, b) => b!.name.localeCompare(a!.name))
-
-      return { releases, current: currentRelease }
+      const cur = (await execOn(ctx, 'bash', ['-lc', `basename "$(readlink ${shellEscape(currentLink)} 2>/dev/null)" 2>/dev/null`]).catch(() => ({ stdout: '' }))).stdout.trim()
+      const { stdout } = await execOn(ctx, 'bash', ['-lc', `cd ${shellEscape(releasesDir)} 2>/dev/null && for d in */; do [ -d "$d" ] && echo "\${d%/}|$(stat -c %Y "\${d%/}" 2>/dev/null)"; done`]).catch(() => ({ stdout: '' }))
+      const releases = stdout.split('\n').filter(Boolean).map((l: string) => {
+        const [name, epoch] = l.split('|')
+        return { name, isCurrent: name === cur, createdAt: new Date((Number(epoch) || 0) * 1000).toISOString() }
+      }).sort((a: any, b: any) => b.name.localeCompare(a.name))
+      return { releases, current: cur }
     } catch {
       return { releases: [], current: '' }
     }
@@ -953,8 +975,12 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
     if (deployEmitters.has(siteId)) return reply.code(409).send({ error: 'A deploy / rollback is already running.' })
 
+    const rbCtx = await serverCtxForSite(app.prisma, site)
     const releasePath = path.join(site.rootPath, 'releases', release)
-    try { await fs.access(releasePath) } catch { return reply.code(404).send({ error: `Release ${release} not found.` }) }
+    const releaseExists = isLocal(rbCtx)
+      ? await fs.access(releasePath).then(() => true).catch(() => false)
+      : await execOn(rbCtx, 'bash', ['-lc', `test -d ${shellEscape(releasePath)}`]).then(() => true).catch(() => false)
+    if (!releaseExists) return reply.code(404).send({ error: `Release ${release} not found.` })
 
     const deployment = await app.prisma.deployment.create({
       data: { siteId, branch: 'rollback', commit: release, status: 'running' }
@@ -972,10 +998,10 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
       const currentPath = path.join(site.rootPath, 'current')
       try {
         push(`↩  Rolling back to release ${release}…`)
-        await exec(`ln -sfn "${releasePath}" "${currentPath}"`)
+        await execOn(rbCtx, 'bash', ['-lc', `ln -sfn ${shellEscape(releasePath)} ${shellEscape(currentPath)}`])
         push(`✓  current → releases/${release}`)
         try {
-          await exec(`php${site.phpVersion} "${currentPath}/artisan" queue:restart --no-interaction`)
+          await execOn(rbCtx, 'bash', ['-lc', `php${site.phpVersion} ${shellEscape(currentPath + '/artisan')} queue:restart --no-interaction`])
           push('✓  queue:restart signal sent')
         } catch { push('⚠  queue:restart failed') }
         push('Rollback complete.')

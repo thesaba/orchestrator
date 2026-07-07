@@ -1,10 +1,8 @@
 import { FastifyPluginAsync } from 'fastify'
-import { spawn, exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import { EventEmitter } from 'events'
 import { getCertInfo } from '../lib/ssl'
-
-const exec = promisify(execCb)
+import { spawnOn, execOn, isLocal } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
 
 // One certbot process per site at a time
 const sslEmitters = new Map<number, EventEmitter>()
@@ -21,7 +19,7 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
-    const cert = await getCertInfo(site.domain)
+    const cert = await getCertInfo(site.domain, await serverCtxForSite(app.prisma, site))
     const running = sslEmitters.has(site.id)
 
     return { ...cert, sslEnabled: site.sslEnabled, running }
@@ -53,14 +51,15 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
     const buffer: string[] = []
     sslLogBuffers.set(siteId, buffer)
 
-    const proc = spawn('certbot', [
+    const ctx = await serverCtxForSite(app.prisma, site)
+    const proc = await spawnOn(ctx, 'certbot', [
       '--nginx',
       '-d', site.domain,
       '--non-interactive',
       '--agree-tos',
       '--email', email,
       '--redirect'
-    ])
+    ], { tty: !isLocal(ctx) })
 
     const addLine = (raw: string) => {
       buffer.push(raw)
@@ -106,12 +105,13 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
     const buffer: string[] = []
     sslLogBuffers.set(siteId, buffer)
 
-    const proc = spawn('certbot', [
+    const ctx = await serverCtxForSite(app.prisma, site)
+    const proc = await spawnOn(ctx, 'certbot', [
       'renew',
       '--cert-name', site.domain,
       '--force-renewal',
       '--non-interactive'
-    ])
+    ], { tty: !isLocal(ctx) })
 
     const addLine = (raw: string) => {
       buffer.push(raw)
@@ -147,7 +147,8 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
     try {
-      await exec(`certbot delete --cert-name "${site.domain}" --non-interactive 2>&1 || true`)
+      const ctx = await serverCtxForSite(app.prisma, site)
+      await execOn(ctx, 'bash', ['-lc', `certbot delete --cert-name "${site.domain}" --non-interactive 2>&1 || true`])
     } catch { /* best-effort */ }
 
     await app.prisma.site.update({ where: { id: siteId }, data: { sslEnabled: false } })

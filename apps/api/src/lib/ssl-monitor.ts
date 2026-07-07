@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getCertInfo } from './ssl'
+import { serverCtxById } from './servers'
 import { sendNotification } from './notify'
 
 // Alert thresholds in days (ascending). We notify once as the certificate
@@ -30,13 +31,12 @@ async function upsertSetting(prisma: any, key: string, value: string) {
 async function checkOnce(app: FastifyInstance) {
   const prisma = app.prisma
   const sites = await prisma.site.findMany({
-    where: { status: 'active', sslEnabled: true },
-    select: { id: true, domain: true }
-  })
+    where: { status: 'active', sslEnabled: true }
+  }) as any[]
 
   for (const site of sites) {
     try {
-      const cert = await getCertInfo(site.domain)
+      const cert = await getCertInfo(site.domain, await serverCtxById(prisma, site.serverId ?? null))
 
       // 1. Refresh the cached status the sites list reads for its badge.
       const entry: SslCacheEntry = {
