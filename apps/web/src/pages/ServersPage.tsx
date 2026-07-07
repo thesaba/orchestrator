@@ -4,6 +4,7 @@ import {
 } from '@shopify/polaris'
 import { api, ServerInfo, ServerProbe, ServerStats } from '../api/client'
 import { useToast } from '../context/toast'
+import { ProvisionLog } from '../components/ProvisionLog'
 
 function fmtBytes(n: number): string {
   if (!n) return '0'
@@ -38,6 +39,7 @@ export function ServersPage() {
   const [busyId, setBusyId] = useState<number | null>(null)
   const [health, setHealth] = useState<{ server: ServerInfo; stats: ServerStats } | null>(null)
   const [healthBusy, setHealthBusy] = useState<number | null>(null)
+  const [prepping, setPrepping] = useState<{ server: ServerInfo; streaming: boolean } | null>(null)
 
   // form
   const [name, setName] = useState('')
@@ -117,6 +119,16 @@ export function ServersPage() {
     } finally { setHealthBusy(null) }
   }
 
+  const prepare = async (s: ServerInfo) => {
+    if (!confirm(`Install the full stack (PHP 8.1–8.5 + extensions, nginx, MariaDB, Composer, Supervisor, Certbot, Redis) on "${s.name}"?\n\nThis runs apt on the server and can take several minutes. Safe to re-run.`)) return
+    try {
+      await api.servers.prepare(s.id)
+      setPrepping({ server: s, streaming: true })
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed to start', { error: true })
+    }
+  }
+
   const remove = async (s: ServerInfo) => {
     if (!confirm(`Delete server "${s.name}"? This is only allowed if it hosts no sites.`)) return
     setBusyId(s.id)
@@ -162,6 +174,9 @@ export function ServersPage() {
                     {s.kind === 'remote' && (
                       <Button onClick={() => testSaved(s)} loading={busyId === s.id} disabled={!s.hasKey}>Test</Button>
                     )}
+                    {s.kind === 'remote' && (
+                      <Button variant="primary" onClick={() => prepare(s)} disabled={!s.hasKey}>Prepare</Button>
+                    )}
                     <Button onClick={() => openEdit(s)}>Edit</Button>
                     {s.kind === 'remote' && (
                       <Button tone="critical" variant="plain" onClick={() => remove(s)} disabled={busyId === s.id || s.siteCount > 0}>Delete</Button>
@@ -173,6 +188,22 @@ export function ServersPage() {
           </BlockStack>
         )}
       </BlockStack>
+
+      <Modal
+        open={!!prepping}
+        onClose={() => { setPrepping(null); load() }}
+        title={prepping ? `Preparing ${prepping.server.name}` : ''}
+        secondaryActions={[{ content: 'Close', onAction: () => { setPrepping(null); load() } }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="300">
+            <Text as="p" variant="bodySm" tone="subdued">
+              Installing PHP 8.1–8.5 (+ extensions), nginx, MariaDB, Composer, Supervisor, Certbot and Redis. This can take several minutes — you can close this and the install keeps running.
+            </Text>
+            {prepping && <ProvisionLog endpoint={`/api/servers/${prepping.server.id}/prepare/stream`} onComplete={() => load()} />}
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
 
       <Modal
         open={!!health}

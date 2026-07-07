@@ -1,8 +1,14 @@
 import { FastifyPluginAsync } from 'fastify'
 import crypto from 'crypto'
+import { EventEmitter } from 'events'
 import { writeSecret } from '../lib/crypto'
-import { execOn, ServerCtx } from '../lib/server-exec'
+import { execOn, spawnOn, ServerCtx } from '../lib/server-exec'
 import { statsFor } from '../lib/server-stats'
+import { ensureScriptsSynced } from '../lib/server-sync'
+
+// In-memory streaming state for the (long-running) server bootstrap.
+const prepEmitters = new Map<number, EventEmitter>()
+const prepBuffers = new Map<number, string[]>()
 
 // Never leak the private key. Public projection of a Server row.
 function publicServer(s: any, siteCount = 0) {
@@ -193,5 +199,68 @@ export const serversRoutes: FastifyPluginAsync = async (app) => {
       const err = e as { stderr?: string; message?: string }
       return reply.code(502).send({ error: (err.stderr || err.message || 'Failed to reach server').toString().slice(0, 300) })
     }
+  })
+
+  // POST /:id/prepare — install the full LEMP stack (PHP 8.1–8.5 + extensions,
+  // nginx, MariaDB, Composer, Supervisor, Certbot, Redis) on a remote server.
+  // Streams output via /:id/prepare/stream. Remote-only (the local host is
+  // already set up and must not be re-bootstrapped from the panel).
+  app.post('/:id/prepare', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    const server = await prisma.server.findUnique({ where: { id } })
+    if (!server) return reply.code(404).send({ error: 'Server not found' })
+    if (server.kind === 'local' || !server.host) {
+      return reply.code(400).send({ error: 'The local server is already set up and cannot be bootstrapped from the panel.' })
+    }
+    if (prepEmitters.has(id)) return reply.code(409).send({ error: 'A bootstrap is already running for this server.' })
+
+    let synced
+    try {
+      synced = await ensureScriptsSynced(app.prisma, id)
+    } catch (e: unknown) {
+      return reply.code(502).send({ error: `Could not reach the server: ${(e as Error).message}` })
+    }
+
+    const ctx: ServerCtx = { kind: 'remote', host: server.host, port: server.port, sshUser: server.sshUser, sshKey: server.sshKey }
+    const emitter = new EventEmitter()
+    emitter.setMaxListeners(20)
+    prepEmitters.set(id, emitter)
+    const buffer: string[] = []
+    prepBuffers.set(id, buffer)
+
+    const addLine = (raw: string) => { buffer.push(raw); emitter.emit('log', raw) }
+
+    const proc = await spawnOn(ctx, 'bash', [`${synced.scriptsDir}/bootstrap-server.sh`], { tty: true })
+    proc.stdout.on('data', (c: Buffer) => addLine(c.toString()))
+    proc.stderr.on('data', (c: Buffer) => addLine(c.toString()))
+    proc.on('close', (code) => {
+      const status = code === 0 ? 'success' : 'failed'
+      emitter.emit('done', status)
+      prepEmitters.delete(id)
+      setTimeout(() => prepBuffers.delete(id), 30 * 60 * 1000)
+    })
+    app.audit('server.prepare', { req: request, meta: { serverId: id, host: server.host } })
+    return { started: true }
+  })
+
+  // GET /:id/prepare/stream — SSE of a running bootstrap.
+  app.get('/:id/prepare/stream', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    reply.hijack()
+    reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
+    const send = (data: object) => { if (!reply.raw.destroyed) reply.raw.write(`data: ${JSON.stringify(data)}\n\n`) }
+
+    for (const line of prepBuffers.get(id) ?? []) send({ line })
+    const emitter = prepEmitters.get(id)
+    if (!emitter) { send({ done: true, status: 'idle' }); reply.raw.end(); return }
+
+    await new Promise<void>((resolve) => {
+      const onLog = (line: string) => send({ line })
+      const onDone = (status: string) => { send({ done: true, status }); reply.raw.end(); cleanup(); resolve() }
+      const ka = setInterval(() => { if (!reply.raw.destroyed) reply.raw.write(': ka\n\n') }, 20_000)
+      const cleanup = () => { emitter.off('log', onLog); emitter.off('done', onDone); clearInterval(ka) }
+      emitter.on('log', onLog); emitter.on('done', onDone)
+      request.raw.on('close', () => { cleanup(); resolve() })
+    })
   })
 }

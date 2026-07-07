@@ -251,7 +251,8 @@ export const api = {
     test: (id: number) => request<ServerProbe>(`/servers/${id}/test`, { method: 'POST' }),
     testConnection: (data: { host: string; port?: number; sshUser?: string; sshKey: string }) =>
       request<ServerProbe>('/servers/test-connection', { method: 'POST', body: JSON.stringify(data) }),
-    health: (id: number) => request<{ ok: boolean; stats: ServerStats }>(`/servers/${id}/health`)
+    health: (id: number) => request<{ ok: boolean; stats: ServerStats }>(`/servers/${id}/health`),
+    prepare: (id: number) => request<{ started: true }>(`/servers/${id}/prepare`, { method: 'POST' })
   },
   siteSecurity: {
     get: (siteId: number) => request<SiteSecurity>(`/sites/${siteId}/security`),
