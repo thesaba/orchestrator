@@ -78,6 +78,10 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 
 ### 📊 Monitoring
 - 🐞 **Log Intelligence (mini-Sentry)** — Laravel errors mined & grouped by type with counts, first/last seen, search & resolve, linked to the deploy that likely introduced them
+- 📈 **Performance insights (APM)** — response-time p50/p95/p99 + uptime % per site (slowest first)
+- 🌍 **Public status pages** — shareable per-site uptime page (90-day history + incidents)
+- 🧵 **Queue dashboard** — pending size, failing-by-class breakdown, bulk retry/flush
+- 📨 **Weekly digest** — a once-a-week health summary to your channels
 - 🔔 **Notification center + threshold alerts** — bell feed for deploys & alerts; raise CPU/RAM/disk/swap rules that fan out to your channels
 - 🎛️ **Customizable dashboard** — drag to reorder, resize, show/hide widgets & save per-user presets
 - 📈 CPU, RAM, disk & swap in real time
@@ -113,6 +117,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🧾 Full **audit log** of privileged actions
 - 🔒 **Secrets encrypted at rest** (AES-256-GCM)
 - 🔑 **Personal Access Tokens** — scriptable panel API for CI/curl (hashed, scoped to your role, revocable)
+- 🛡️ **Per-site security** — HTTP basic auth + IP allow/deny, applied to nginx with backup + validate + auto-rollback
 
 ### 🧠 Productivity
 - 📱 **Interactive Telegram bot** — manage sites, deploys, rollbacks & tasks from chat, with your own role/site permissions

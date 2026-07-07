@@ -109,6 +109,12 @@ model Site {
   uptimeMonitor   Boolean        @default(true)
   statusPageEnabled Boolean      @default(false)
   statusPageToken   String?      @unique
+  // ── Per-site nginx security (all default off → existing sites unaffected) ──
+  secBasicAuth    Boolean        @default(false)
+  secBasicUser    String?
+  secBasicHash    String?        // bcrypt hash; htpasswd line = "user:hash"
+  secIpMode       String?        // "allow" (allowlist) | "deny" (denylist) | null
+  secIpList       String?        // JSON array of IPs/CIDRs
   pinned          Boolean        @default(false)
   disabled        Boolean        @default(false) // serving toggled off via Nginx (distinct from maintenanceMode)
   tags            String         @default("[]")

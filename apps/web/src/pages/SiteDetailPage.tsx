@@ -26,6 +26,7 @@ import { ProvisionLog }      from '../components/ProvisionLog'
 import { DeployReviewModal }  from '../components/DeployReview'
 import { LogConsole }         from '../components/LogConsole'
 import { StatusPageCard }     from '../components/StatusPageCard'
+import { SiteSecurityCard }   from '../components/SiteSecurityCard'
 import { ConfigEditor }      from '../components/ConfigEditor'
 import { WorkersTab }        from '../components/WorkersTab'
 import { SslTab }            from '../components/SslTab'
@@ -1051,6 +1052,7 @@ export function SiteDetailPage() {
                 <SslTab siteId={siteId} />
               </Card>
               <StatusPageCard siteId={siteId} />
+              {isAdmin && <SiteSecurityCard siteId={siteId} />}
             </BlockStack>
           )}
 

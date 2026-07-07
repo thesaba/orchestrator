@@ -229,6 +229,11 @@ export const api = {
       request<AlertRule>(`/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     remove: (id: number) => request<{ ok: true }>(`/alerts/${id}`, { method: 'DELETE' })
   },
+  siteSecurity: {
+    get: (siteId: number) => request<SiteSecurity>(`/sites/${siteId}/security`),
+    update: (siteId: number, data: { basicAuth?: boolean; basicUser?: string; basicPassword?: string; ipMode?: 'allow' | 'deny' | 'off'; ipList?: string[] }) =>
+      request<SiteSecurity>(`/sites/${siteId}/security`, { method: 'POST', body: JSON.stringify(data) })
+  },
   statusPage: {
     get: (siteId: number) => request<StatusPageConfig>(`/sites/${siteId}/status-page`),
     toggle: (siteId: number, enabled: boolean) =>
@@ -609,6 +614,14 @@ export interface StatusPageConfig {
   enabled: boolean
   token: string | null
   url: string | null
+}
+
+export interface SiteSecurity {
+  basicAuth: boolean
+  basicUser: string | null
+  hasPassword: boolean
+  ipMode: 'allow' | 'deny' | null
+  ipList: string[]
 }
 
 export interface PublicStatus {

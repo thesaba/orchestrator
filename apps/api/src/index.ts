@@ -48,6 +48,7 @@ import { logErrorsRoutes } from './routes/log-errors'
 import { telegramRoutes } from './routes/telegram'
 import { digestRoutes } from './routes/digest'
 import { statusPageRoutes } from './routes/status-page'
+import { siteSecurityRoutes } from './routes/site-security'
 import { publicRoutes } from './routes/public'
 import { startUptimeMonitor } from './lib/uptime-monitor'
 import { startDigestMonitor } from './lib/digest'
@@ -135,6 +136,7 @@ async function start() {
   await app.register(telegramRoutes,    { prefix: '/api/telegram' })
   await app.register(digestRoutes,      { prefix: '/api/digest' })
   await app.register(statusPageRoutes,  { prefix: '/api/sites' })
+  await app.register(siteSecurityRoutes, { prefix: '/api/sites' })
   await app.register(publicRoutes,      { prefix: '/api/public' })
 
   // Loopback-only, shared-secret-protected — used by the phpMyAdmin signon
