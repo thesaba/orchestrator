@@ -312,7 +312,7 @@ model Setting {
 model Deployment {
   id        Int      @id @default(autoincrement())
   siteId    Int
-  site      Site     @relation(fields: [siteId], references: [id])
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
   commit    String?
   branch    String   @default("main")
   status    String   @default("pending")
