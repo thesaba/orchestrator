@@ -46,7 +46,9 @@ import { notificationsRoutes } from './routes/notifications'
 import { alertsRoutes } from './routes/alerts'
 import { logErrorsRoutes } from './routes/log-errors'
 import { telegramRoutes } from './routes/telegram'
+import { digestRoutes } from './routes/digest'
 import { startUptimeMonitor } from './lib/uptime-monitor'
+import { startDigestMonitor } from './lib/digest'
 import { startAlertsMonitor } from './lib/alerts-monitor'
 import { startLogCollector } from './lib/log-collector'
 import { startSslMonitor } from './lib/ssl-monitor'
@@ -129,6 +131,7 @@ async function start() {
   await app.register(alertsRoutes,      { prefix: '/api/alerts' })
   await app.register(logErrorsRoutes,   { prefix: '/api/log-errors' })
   await app.register(telegramRoutes,    { prefix: '/api/telegram' })
+  await app.register(digestRoutes,      { prefix: '/api/digest' })
 
   // Loopback-only, shared-secret-protected — used by the phpMyAdmin signon
   // bridge to redeem a one-time token for real DB credentials. See
@@ -152,6 +155,7 @@ async function start() {
   startMetricsMonitor(app.prisma)
   startAlertsMonitor(app)
   startLogCollector(app)
+  startDigestMonitor(app)
 
   // Graceful shutdown: kill any in-flight deploys before exiting. Deploy
   // child processes are spawned `detached: true` so they survive this

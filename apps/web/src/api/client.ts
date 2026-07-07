@@ -227,6 +227,12 @@ export const api = {
       request<AlertRule>(`/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     remove: (id: number) => request<{ ok: true }>(`/alerts/${id}`, { method: 'DELETE' })
   },
+  digest: {
+    get: () => request<DigestConfig>('/digest'),
+    update: (data: { enabled?: boolean; day?: number }) =>
+      request<{ ok: true }>('/digest', { method: 'PATCH', body: JSON.stringify(data) }),
+    sendNow: () => request<{ ok: boolean; digest: DigestData }>('/digest/send-now', { method: 'POST' })
+  },
   telegram: {
     me: () => request<TelegramStatus>('/telegram/me'),
     linkCode: () => request<{ code: string; botUsername: string; deepLink: string | null; expiresAt: string }>('/telegram/link-code', { method: 'POST' }),
@@ -573,6 +579,24 @@ export interface AccessToken {
   lastUsedAt: string | null
   expiresAt: string | null
   createdAt: string
+}
+
+export interface DigestData {
+  since: string
+  deploySuccess: number
+  deployFailed: number
+  uptimePct: number | null
+  avgMs: number | null
+  errOpen: number
+  errNew: number
+  sites: number
+}
+
+export interface DigestConfig {
+  enabled: boolean
+  day: number
+  lastSent: string | null
+  preview: DigestData
 }
 
 export interface TelegramStatus {

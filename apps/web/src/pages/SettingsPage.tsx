@@ -18,6 +18,7 @@ import { api, PanelSettings, s3Api, DODroplet, AccessToken } from '../api/client
 import { useToast } from '../context/toast'
 import { useAuth } from '../context/AuthContext'
 import { TelegramCard } from '../components/TelegramCard'
+import { DigestCard } from '../components/DigestCard'
 
 const EMPTY: PanelSettings = {
   panel_title: '',
@@ -284,6 +285,10 @@ export function SettingsPage() {
 
   const notificationsTab = (
     <Layout>
+      <Layout.Section>
+        <DigestCard />
+      </Layout.Section>
+
       <Layout.Section>
         <Card>
           <BlockStack gap="400">
