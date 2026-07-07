@@ -46,6 +46,7 @@ import { Breadcrumb }        from '../components/Breadcrumb'
 import { useToast } from '../context/toast'
 import { DatabaseTab }       from '../components/DatabaseTab'
 import { useAuth }           from '../context/AuthContext'
+import { Markdown }          from '../utils/markdown'
 
 const DESTRUCTIVE_ARTISAN = new Set([
   'migrate:rollback',
@@ -1186,8 +1187,8 @@ export function SiteDetailPage() {
                     >✨ Diagnose with AI</Button>
                   </InlineStack>
                   {deployAi && (
-                    <div style={{ whiteSpace: 'pre-wrap', background: 'var(--oc-bg-secondary, #f6f6f7)', border: '1px solid var(--oc-border, #e1e3e5)', borderRadius: 8, padding: 12, fontSize: 13 }}>
-                      {deployAi}
+                    <div style={{ background: 'var(--oc-bg-secondary, #f6f6f7)', border: '1px solid var(--oc-border, #e1e3e5)', borderRadius: 8, padding: 12, fontSize: 13 }}>
+                      {deployAi.startsWith('⚠️') ? deployAi : <Markdown text={deployAi} />}
                     </div>
                   )}
                 </>

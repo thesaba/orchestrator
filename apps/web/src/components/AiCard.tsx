@@ -15,11 +15,14 @@ export function AiCard() {
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [enabled, setEnabled] = useState(false)
+  const [dailyLimit, setDailyLimit] = useState('0')
   const [busy, setBusy] = useState(false)
+  const [testing, setTesting] = useState(false)
 
   const load = useCallback(() => {
     api.ai.config().then((c) => {
       setCfg(c); setProvider(c.provider); setModel(c.model); setBaseUrl(c.baseUrl); setEnabled(c.enabled)
+      setDailyLimit(String(c.dailyLimit ?? 0))
     }).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
@@ -27,13 +30,24 @@ export function AiCard() {
   const save = async () => {
     setBusy(true)
     try {
-      await api.ai.saveConfig({ enabled, provider, model: model || undefined, baseUrl: baseUrl || undefined, ...(apiKey ? { apiKey } : {}) })
+      await api.ai.saveConfig({ enabled, provider, model: model || undefined, baseUrl: baseUrl || undefined, dailyLimit: Number(dailyLimit) || 0, ...(apiKey ? { apiKey } : {}) })
       setApiKey('')
       showToast('AI settings saved')
       load()
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : 'Failed', { error: true })
     } finally { setBusy(false) }
+  }
+
+  const test = async () => {
+    setTesting(true)
+    try {
+      const r = await api.ai.test()
+      showToast(`Connection OK — model replied: ${r.reply.slice(0, 40)}`)
+      load()
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Connection failed', { error: true })
+    } finally { setTesting(false) }
   }
 
   return (
@@ -88,7 +102,26 @@ export function AiCard() {
           helpText="Stored encrypted, never returned to the browser."
         />
 
-        <InlineStack align="end">
+        <div style={{ width: 220 }}>
+          <TextField
+            label="Daily request limit"
+            type="number"
+            value={dailyLimit}
+            onChange={setDailyLimit}
+            autoComplete="off"
+            min={0}
+            helpText="0 = unlimited. Caps AI calls per day to bound cost."
+          />
+        </div>
+
+        {cfg?.configured && (
+          <Text as="p" variant="bodySm" tone="subdued">
+            Usage today: {cfg.usageToday}{cfg.dailyLimit ? ` / ${cfg.dailyLimit}` : ' (unlimited)'}
+          </Text>
+        )}
+
+        <InlineStack align="end" gap="200">
+          <Button onClick={test} loading={testing} disabled={!cfg?.configured}>Test connection</Button>
           <Button variant="primary" onClick={save} loading={busy}>Save AI settings</Button>
         </InlineStack>
       </BlockStack>

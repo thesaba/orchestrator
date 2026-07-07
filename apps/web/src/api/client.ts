@@ -231,12 +231,15 @@ export const api = {
   },
   ai: {
     config: () => request<AiConfig>('/ai/config'),
-    saveConfig: (data: { enabled?: boolean; provider?: string; model?: string; baseUrl?: string; apiKey?: string }) =>
+    saveConfig: (data: { enabled?: boolean; provider?: string; model?: string; baseUrl?: string; apiKey?: string; dailyLimit?: number }) =>
       request<{ ok: true }>('/ai/config', { method: 'PATCH', body: JSON.stringify(data) }),
     explainError: (id: number, force = false) =>
       request<{ explanation: string; cached: boolean }>(`/ai/explain-error/${id}${force ? '?force=1' : ''}`, { method: 'POST' }),
     explainDeploy: (deploymentId: number) =>
-      request<{ explanation: string }>(`/ai/explain-deploy/${deploymentId}`, { method: 'POST' })
+      request<{ explanation: string }>(`/ai/explain-deploy/${deploymentId}`, { method: 'POST' }),
+    test: () => request<{ ok: true; reply: string }>('/ai/test', { method: 'POST' }),
+    chat: (message: string, siteId?: number, history?: { role: 'user' | 'assistant'; content: string }[]) =>
+      request<{ reply: string }>('/ai/chat', { method: 'POST', body: JSON.stringify({ message, siteId, history }) })
   },
   siteSecurity: {
     get: (siteId: number) => request<SiteSecurity>(`/sites/${siteId}/security`),
@@ -631,6 +634,8 @@ export interface AiConfig {
   model: string
   baseUrl: string
   configured: boolean
+  usageToday: number
+  dailyLimit: number
 }
 
 export interface SiteSecurity {

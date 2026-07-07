@@ -5,7 +5,7 @@ import {
   DatabaseIcon, WandIcon, BugIcon, ShieldCheckMarkIcon,
   WrenchIcon, ListBulletedIcon, AutomationIcon, PackageIcon,
   CodeAddIcon, FolderIcon, ClipboardChecklistIcon, PinIcon,
-  RefreshIcon, TeamIcon, CalendarIcon, NoteIcon
+  RefreshIcon, TeamIcon, CalendarIcon, NoteIcon, MagicIcon
 } from '@shopify/polaris-icons'
 import { ReactNode, useState, useCallback, useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useMatch, useSearchParams } from 'react-router-dom'
@@ -316,6 +316,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             { label: 'Sites',      icon: GlobeIcon,         url: '/sites' },
             { label: 'Monitoring', icon: ChartVerticalIcon, url: '/monitoring' },
             ...(isAdmin ? [{ label: 'Errors', icon: BugIcon, url: '/errors' }] : []),
+            ...(isAdmin ? [{ label: 'AI Assistant', icon: MagicIcon, url: '/assistant' }] : []),
             { label: 'Settings',   icon: SettingsIcon,      url: '/settings' },
             ...(isAdmin ? [{ label: 'Team', icon: TeamIcon, url: '/team' }] : []),
             ...(isAdmin ? [{ label: 'Server', icon: GaugeIcon, url: '/server' }] : []),

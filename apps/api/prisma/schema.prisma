@@ -157,6 +157,13 @@ model LogError {
   @@index([resolved, lastSeenAt])
 }
 
+// Per-day AI usage counter, for the optional daily call limit / cost control.
+model AiUsage {
+  id    Int    @id @default(autoincrement())
+  date  String @unique // YYYY-MM-DD
+  count Int    @default(0)
+}
+
 // In-app notification feed (deploy results, threshold alerts, SSL, …). Global
 // to the panel — the bell shows the unread count and recent items.
 model Notification {

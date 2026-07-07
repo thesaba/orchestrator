@@ -120,7 +120,7 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🛡️ **Per-site security** — HTTP basic auth + IP allow/deny, applied to nginx with backup + validate + auto-rollback
 
 ### 🧠 Productivity
-- ✨ **AI assistant** — explains errors & diagnoses failed deploys (bring-your-own-key, secrets redacted, read-only; supports OpenAI-compatible & Anthropic, incl. local models)
+- ✨ **AI assistant** — explains errors, diagnoses failed deploys, and answers free-form ops questions in a chat page (optionally grounded in a site's live status + recent errors). Bring-your-own-key, secrets redacted, read-only/advisory; supports OpenAI-compatible & Anthropic (incl. local models like Ollama), with a configurable daily request limit, usage counter and one-click connection test
 - 📱 **Interactive Telegram bot** — manage sites, deploys, rollbacks & tasks from chat, with your own role/site permissions
 - 🔎 **Search, sort & tag-filter** across your sites
 - 🗂️ Kanban **task board** · 📝 Notes · 📅 Calendar

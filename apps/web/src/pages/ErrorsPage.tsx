@@ -6,6 +6,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { api, LogErrorItem, LogErrorDetail, Site } from '../api/client'
 import { EmptyState } from '../components/EmptyState'
+import { Markdown } from '../utils/markdown'
 
 function levelTone(level: string): 'critical' | 'warning' | 'attention' {
   if (level === 'warning') return 'warning'
@@ -199,8 +200,8 @@ export function ErrorsPage() {
                 {aiText && <Button variant="plain" onClick={() => explain(detail.id, true)} disabled={aiBusy}>Regenerate</Button>}
               </InlineStack>
               {aiText && (
-                <div style={{ whiteSpace: 'pre-wrap', background: 'var(--oc-bg-secondary, #f6f6f7)', border: '1px solid var(--oc-border, #e1e3e5)', borderRadius: 8, padding: 12, fontSize: 13 }}>
-                  {aiText}
+                <div style={{ background: 'var(--oc-bg-secondary, #f6f6f7)', border: '1px solid var(--oc-border, #e1e3e5)', borderRadius: 8, padding: 12, fontSize: 13 }}>
+                  {aiText.startsWith('⚠️') ? aiText : <Markdown text={aiText} />}
                 </div>
               )}
             </BlockStack>

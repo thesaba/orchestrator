@@ -56,41 +56,66 @@ export function clip(text: string, max = 6000): string {
   return t
 }
 
+// ── Usage / daily limit ──────────────────────────────────────────────────────
+function today(): string { return new Date().toISOString().slice(0, 10) }
+
+export async function todayUsage(app: FastifyInstance): Promise<number> {
+  const row = await app.prisma.aiUsage.findUnique({ where: { date: today() } }).catch(() => null)
+  return row?.count ?? 0
+}
+
+async function bumpUsage(app: FastifyInstance): Promise<void> {
+  const d = today()
+  await app.prisma.aiUsage.upsert({ where: { date: d }, create: { date: d, count: 1 }, update: { count: { increment: 1 } } }).catch(() => {})
+}
+
+export type ChatMessage = { role: 'user' | 'assistant'; content: string }
+
 // ── Provider call ────────────────────────────────────────────────────────────
-export async function aiComplete(app: FastifyInstance, opts: { system: string; user: string; maxTokens?: number }): Promise<string> {
+export async function aiComplete(app: FastifyInstance, opts: { system: string; user?: string; messages?: ChatMessage[]; maxTokens?: number }): Promise<string> {
   const cfg = await getAiConfig(app)
   if (!cfg.enabled) throw Object.assign(new Error('AI assistant is disabled. Enable it in Settings → Integrations.'), { code: 400 })
   if (!cfg.apiKey) throw Object.assign(new Error('No AI API key configured.'), { code: 400 })
 
+  const limit = Number((await getSetting(app, 'ai_daily_limit')) || '0')
+  if (limit > 0 && (await todayUsage(app)) >= limit) {
+    throw Object.assign(new Error(`Daily AI request limit reached (${limit}). Raise it in Settings → Integrations.`), { code: 429 })
+  }
+
+  const msgs: ChatMessage[] = opts.messages ?? [{ role: 'user', content: opts.user ?? '' }]
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 45_000)
   try {
+    let text: string
     if (cfg.provider === 'anthropic') {
       const res = await fetch(`${cfg.baseUrl}/v1/messages`, {
         method: 'POST',
         signal: ctrl.signal,
         headers: { 'content-type': 'application/json', 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: cfg.model, max_tokens: opts.maxTokens ?? 700, system: opts.system, messages: [{ role: 'user', content: opts.user }] })
+        body: JSON.stringify({ model: cfg.model, max_tokens: opts.maxTokens ?? 700, system: opts.system, messages: msgs })
       })
       const data: any = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error?.message ?? `AI request failed (${res.status})`)
-      return (data?.content?.[0]?.text ?? '').trim() || 'No response.'
-    }
-    // OpenAI-compatible (OpenAI, Ollama, LocalAI, groq, …).
-    const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({
-        model: cfg.model,
-        max_tokens: opts.maxTokens ?? 700,
-        temperature: 0.2,
-        messages: [{ role: 'system', content: opts.system }, { role: 'user', content: opts.user }]
+      text = (data?.content?.[0]?.text ?? '').trim()
+    } else {
+      // OpenAI-compatible (OpenAI, Ollama, LocalAI, groq, …).
+      const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify({
+          model: cfg.model,
+          max_tokens: opts.maxTokens ?? 700,
+          temperature: 0.2,
+          messages: [{ role: 'system', content: opts.system }, ...msgs]
+        })
       })
-    })
-    const data: any = await res.json().catch(() => null)
-    if (!res.ok) throw new Error(data?.error?.message ?? `AI request failed (${res.status})`)
-    return (data?.choices?.[0]?.message?.content ?? '').trim() || 'No response.'
+      const data: any = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error?.message ?? `AI request failed (${res.status})`)
+      text = (data?.choices?.[0]?.message?.content ?? '').trim()
+    }
+    await bumpUsage(app)
+    return text || 'No response.'
   } finally {
     clearTimeout(timer)
   }
@@ -101,3 +126,10 @@ export const SYSTEM_PROMPT =
   'Be concise and practical. Give: (1) the likely root cause, (2) concrete fix steps, (3) a short code/command example only if clearly safe. ' +
   'Never invent secrets. If the input is ambiguous, say what extra info is needed. ' +
   'End with a one-line reminder that this is AI-generated advice to verify before applying.'
+
+export const CHAT_SYSTEM_PROMPT =
+  'You are the assistant inside Orchestrator, a self-hosted server control panel for PHP/Laravel sites. ' +
+  'Help the admin operate their servers and sites: deploys, nginx, PHP-FPM, queues, databases, SSL, performance and errors. ' +
+  'Be concise and practical. Use any CONTEXT provided about a site (status, recent errors) to ground your answer. ' +
+  'You are read-only: you cannot run commands — suggest what the admin should do. Never invent secrets or data. ' +
+  'If asked to do something destructive, warn clearly and recommend a backup first.'
