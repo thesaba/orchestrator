@@ -1,27 +1,24 @@
 import { FastifyPluginAsync } from 'fastify'
-import { promises as fs } from 'fs'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
-import os from 'os'
 import path from 'path'
+import os from 'os'
+import { execOn, ServerCtx } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
+import { readFileOn, writeFileOn, unlinkOn } from '../lib/server-fs'
 
-const exec = promisify(execCb)
-
-// The orchestrator-api process runs as an unprivileged 'deployer' user (see
-// scripts/orchestrator-api.service), so it cannot write into /etc/php/* or
-// reload php-fpm directly. We write the new config to a temp file we DO own,
-// then hand off to root only for the copy + reload via a narrowly-scoped
-// sudoers rule (see DEPLOY_GUIDE.md — /etc/sudoers.d/deployer-fpm).
-async function sudoWriteAndReload(filePath: string, content: string, phpVersion: string) {
+// The orchestrator-api process may run as an unprivileged user, so it writes the
+// new config to a temp file it owns, then hands off to root only for the copy +
+// reload via a narrowly-scoped sudoers rule. This runs on the SITE'S server:
+// local → in-process; remote → over SSH (server-fs writes the temp file there).
+async function sudoWriteAndReload(ctx: ServerCtx, filePath: string, content: string, phpVersion: string) {
   const tmp = path.join(os.tmpdir(), `fpm-pool-${Date.now()}.conf`)
-  await fs.writeFile(tmp, content, { mode: 0o644 })
+  await writeFileOn(ctx, tmp, content, { mode: 0o644 })
   try {
-    await exec(`sudo /usr/bin/install -m 0644 "${tmp}" "${filePath}"`)
+    await execOn(ctx, 'bash', ['-lc', `sudo /usr/bin/install -m 0644 "${tmp}" "${filePath}"`])
   } finally {
-    await fs.unlink(tmp).catch(() => {})
+    await unlinkOn(ctx, tmp)
   }
 
-  const { stdout: testOut } = await exec(`sudo /usr/sbin/php-fpm${phpVersion} -t 2>&1`)
+  const { stdout: testOut } = await execOn(ctx, 'bash', ['-lc', `sudo /usr/sbin/php-fpm${phpVersion} -t 2>&1`])
     .catch((e: any) => ({ stdout: e.stdout ?? e.stderr ?? '' }))
   if (testOut.includes('FAILED')) {
     throw new Error(`Config syntax error: ${testOut}`)
@@ -29,7 +26,7 @@ async function sudoWriteAndReload(filePath: string, content: string, phpVersion:
 
   let reloaded = false
   try {
-    await exec(`sudo /usr/bin/systemctl reload php${phpVersion}-fpm`)
+    await execOn(ctx, 'bash', ['-lc', `sudo /usr/bin/systemctl reload php${phpVersion}-fpm`])
     reloaded = true
   } catch { /* fpm reload optional */ }
 
@@ -73,11 +70,12 @@ php_admin_flag[log_errors] = on
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const filePath = poolPath(site.domain, site.phpVersion)
     let content = ''
     let exists = false
     try {
-      content = await fs.readFile(filePath, 'utf-8')
+      content = await readFileOn(ctx, filePath)
       exists = true
     } catch {
       content = defaultPool(site.domain, site.phpVersion)
@@ -108,7 +106,8 @@ php_admin_flag[log_errors] = on
     if (!content.includes('[')) return reply.code(400).send({ error: 'Invalid PHP-FPM pool config' })
 
     try {
-      const reloaded = await sudoWriteAndReload(filePath, content, site.phpVersion)
+      const ctx = await serverCtxForSite(app.prisma, site)
+      const reloaded = await sudoWriteAndReload(ctx, filePath, content, site.phpVersion)
       app.audit('phpfpm.updated', { siteId: site.id, meta: { domain: site.domain } })
       return { ok: true, reloaded, path: filePath }
     } catch (err: unknown) {

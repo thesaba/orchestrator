@@ -1,27 +1,24 @@
 import { FastifyPluginAsync } from 'fastify'
-import { promises as fs } from 'fs'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import os from 'os'
 import path from 'path'
+import { execOn, ServerCtx } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
+import { writeFileOn, unlinkOn, existsOn } from '../lib/server-fs'
 
-const exec = promisify(execCb)
-
-// orchestrator-api runs as the unprivileged 'deployer' user, which cannot
-// write into /etc/cron.d directly — hand off to root via a narrowly-scoped
-// sudoers rule (see DEPLOY_GUIDE.md — /etc/sudoers.d/deployer-fpm).
-async function sudoWriteCron(filePath: string, content: string) {
+// Cron files live in /etc/cron.d, which needs root — hand off via a temp file +
+// sudo install. Runs on the SITE'S server (local in-process, remote over SSH).
+async function sudoWriteCron(ctx: ServerCtx, filePath: string, content: string) {
   const tmp = path.join(os.tmpdir(), `cron-${Date.now()}`)
-  await fs.writeFile(tmp, content, { mode: 0o644 })
+  await writeFileOn(ctx, tmp, content, { mode: 0o644 })
   try {
-    await exec(`sudo /usr/bin/install -m 0644 "${tmp}" "${filePath}"`)
+    await execOn(ctx, 'bash', ['-lc', `sudo /usr/bin/install -m 0644 "${tmp}" "${filePath}"`])
   } finally {
-    await fs.unlink(tmp).catch(() => {})
+    await unlinkOn(ctx, tmp)
   }
 }
 
-async function sudoRemoveCron(filePath: string) {
-  await exec(`sudo /usr/bin/rm -f "${filePath}"`)
+async function sudoRemoveCron(ctx: ServerCtx, filePath: string) {
+  await execOn(ctx, 'bash', ['-lc', `sudo /usr/bin/rm -f "${filePath}"`])
 }
 
 export const schedulerRoutes: FastifyPluginAsync = async (app) => {
@@ -47,12 +44,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const filePath = cronPath(site.domain)
-    let active = false
-    try {
-      await fs.access(filePath)
-      active = true
-    } catch { /* not enabled */ }
+    const active = await existsOn(ctx, filePath)
 
     return {
       active,
@@ -68,11 +62,12 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const filePath = cronPath(site.domain)
     const content = cronContent(site.domain, site.phpVersion, site.rootPath)
 
     try {
-      await sudoWriteCron(filePath, content)
+      await sudoWriteCron(ctx, filePath, content)
       app.audit('scheduler.enabled', { siteId: site.id, meta: { domain: site.domain } })
       return { ok: true, cronPath: filePath }
     } catch (err: unknown) {
@@ -89,7 +84,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
     try {
-      await sudoRemoveCron(cronPath(site.domain))
+      const ctx = await serverCtxForSite(app.prisma, site)
+      await sudoRemoveCron(ctx, cronPath(site.domain))
     } catch { /* already gone — ok */ }
 
     app.audit('scheduler.disabled', { siteId: site.id, meta: { domain: site.domain } })

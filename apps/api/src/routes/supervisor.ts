@@ -1,30 +1,23 @@
 import { FastifyPluginAsync } from 'fastify'
-import { promises as fs } from 'fs'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
-
-const exec = promisify(execCb)
+import { execOn, ServerCtx } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
+import { readFileOn, writeFileOn, existsOn, unlinkOn, mkdirOn } from '../lib/server-fs'
 
 const VALID_WORKER_ACTIONS = new Set(['start', 'stop', 'restart'])
 
-// shared/logs is created by provision.sh as www-data:www-data, mode 750.
-// In some deployments orchestrator-api runs as an unprivileged 'deployer'
-// user, in which case plain fs.mkdir() fails with EACCES and we fall back to
-// a narrowly-scoped sudoers rule — see DEPLOY_GUIDE.md §5.3
-// (/etc/sudoers.d/deployer-fpm). Errors from BOTH attempts are logged (not
-// swallowed) since a silent failure here is what caused the CANT_REREAD bug
-// to go unexplained for so long.
-async function ensureSharedLogsDir(rootPath: string): Promise<void> {
+// Run a shell command on the site's server (local in-process, remote over SSH).
+const sh = (ctx: ServerCtx, cmd: string) => execOn(ctx, 'bash', ['-lc', cmd])
+
+// shared/logs is created by provision.sh as www-data:www-data, mode 750. If the
+// panel runs unprivileged, plain mkdir may fail — fall back to a sudo install.
+// Runs on the site's own server.
+async function ensureSharedLogsDir(ctx: ServerCtx, rootPath: string): Promise<void> {
   const dir = `${rootPath}/shared/logs`
-  try {
-    await fs.mkdir(dir, { recursive: true })
-    return
-  } catch (err) {
+  try { await mkdirOn(ctx, dir); return } catch (err) {
     console.error(`[supervisor] direct mkdir failed for ${dir}:`, err)
   }
   try {
-    const { stdout, stderr } = await exec(`sudo /usr/bin/install -d -o www-data -g www-data -m 0750 "${dir}"`)
-    console.error(`[supervisor] sudo install -d fallback for ${dir} succeeded. stdout=${stdout} stderr=${stderr}`)
+    await sh(ctx, `sudo /usr/bin/install -d -o www-data -g www-data -m 0750 "${dir}"`)
   } catch (err) {
     console.error(`[supervisor] sudo install -d fallback ALSO failed for ${dir}:`, err)
   }
@@ -41,10 +34,11 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const configPath = `/etc/supervisor/conf.d/${site.domain}-worker.conf`
     try {
-      const content = await fs.readFile(configPath, 'utf-8')
+      const content = await readFileOn(ctx, configPath)
       return { content, path: configPath }
     } catch {
       return { content: supervisorTemplate(site), path: configPath }
@@ -65,19 +59,19 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const { content } = request.body as { content: string }
     const configPath = `/etc/supervisor/conf.d/${site.domain}-worker.conf`
 
     // supervisord refuses to (re)read a config whose stdout_logfile directory
-    // doesn't exist yet (CANT_REREAD). Sites provisioned before shared/logs
-    // was added to provision.sh won't have it — create it defensively here.
-    await ensureSharedLogsDir(site.rootPath)
+    // doesn't exist yet (CANT_REREAD) — create it defensively here.
+    await ensureSharedLogsDir(ctx, site.rootPath)
 
-    await fs.writeFile(configPath, content, 'utf-8')
+    await writeFileOn(ctx, configPath, content)
 
     try {
-      const { stdout, stderr } = await exec('supervisorctl reread && supervisorctl update 2>&1')
+      const { stdout, stderr } = await sh(ctx, 'supervisorctl reread && supervisorctl update 2>&1')
       return { ok: true, output: (stdout + stderr).trim() }
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; message?: string }
@@ -93,11 +87,12 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const group = `${site.domain}-worker`
     try {
       // supervisorctl returns non-zero when processes are not RUNNING — capture both cases
-      const result = await exec(`supervisorctl status "${group}:" 2>&1`).catch((e: unknown) => ({
+      const result = await sh(ctx, `supervisorctl status "${group}:" 2>&1`).catch((e: unknown) => ({
         stdout: (e as { stdout?: string; stderr?: string }).stdout ?? '',
         stderr: (e as { stderr?: string }).stderr ?? ''
       }))
@@ -125,6 +120,7 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const { action } = request.body as { action: string }
     if (!VALID_WORKER_ACTIONS.has(action)) {
@@ -138,16 +134,15 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
 
     // If starting, ensure the supervisor config exists first
     if (action === 'start') {
-      const configExists = await fs.access(configPath).catch(() => null)
-      if (configExists === null) {
-        await ensureSharedLogsDir(site.rootPath)
-        await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
-        await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
+      if (!(await existsOn(ctx, configPath))) {
+        await ensureSharedLogsDir(ctx, site.rootPath)
+        await writeFileOn(ctx, configPath, supervisorTemplate(site))
+        await sh(ctx, 'supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
       }
     }
 
     try {
-      const result = await exec(`supervisorctl ${action} "${group}:" 2>&1`)
+      const result = await sh(ctx, `supervisorctl ${action} "${group}:" 2>&1`)
       output = (result.stdout + result.stderr).trim()
       ok = true
     } catch (err: unknown) {
@@ -157,13 +152,12 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
 
     // If control command failed with "no such group", try writing config and retrying
     if (!ok && output.includes('no such group')) {
-      const configExists = await fs.access(configPath).catch(() => null)
-      if (configExists === null) {
-        await ensureSharedLogsDir(site.rootPath)
-        await fs.writeFile(configPath, supervisorTemplate(site), 'utf-8')
-        await exec('supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
+      if (!(await existsOn(ctx, configPath))) {
+        await ensureSharedLogsDir(ctx, site.rootPath)
+        await writeFileOn(ctx, configPath, supervisorTemplate(site))
+        await sh(ctx, 'supervisorctl reread && supervisorctl update 2>&1').catch(() => {})
         try {
-          const result = await exec(`supervisorctl ${action} "${group}:" 2>&1`)
+          const result = await sh(ctx, `supervisorctl ${action} "${group}:" 2>&1`)
           output = (result.stdout + result.stderr).trim()
           ok = true
         } catch (err: unknown) {
@@ -179,7 +173,7 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Re-fetch status so the frontend can update immediately
-    const statusResult = await exec(`supervisorctl status "${group}:" 2>&1`).catch((e: unknown) => ({
+    const statusResult = await sh(ctx, `supervisorctl status "${group}:" 2>&1`).catch((e: unknown) => ({
       stdout: (e as { stdout?: string }).stdout ?? ''
     }))
     const processes = parseStatus((statusResult as { stdout: string }).stdout ?? '')
@@ -194,11 +188,12 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const cronPath = cronFilePath(site.domain)
     const expected = cronLine(site.domain, site.phpVersion, site.rootPath)
     try {
-      const content = await fs.readFile(cronPath, 'utf-8')
+      const content = await readFileOn(ctx, cronPath)
       return { active: true, content, path: cronPath, expected }
     } catch {
       return { active: false, content: '', path: cronPath, expected }
@@ -211,12 +206,13 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const cronPath = cronFilePath(site.domain)
     const content = cronLine(site.domain, site.phpVersion, site.rootPath)
-    await fs.writeFile(cronPath, content + '\n', 'utf-8')
+    await writeFileOn(ctx, cronPath, content + '\n')
     // cron.d files must be owned by root and not world-writable
-    await exec(`chmod 644 "${cronPath}"`).catch(() => {})
+    await sh(ctx, `chmod 644 "${cronPath}"`).catch(() => {})
     return { ok: true, path: cronPath }
   })
 
@@ -226,9 +222,10 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const cronPath = cronFilePath(site.domain)
-    try { await fs.unlink(cronPath) } catch { /* already removed */ }
+    await unlinkOn(ctx, cronPath)
     return { ok: true }
   })
 }
