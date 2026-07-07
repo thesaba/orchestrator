@@ -24,6 +24,7 @@ const CalendarPage   = lazy(() => named(import('./pages/CalendarPage'), 'Calenda
 const ServerPage     = lazy(() => named(import('./pages/ServerPage'), 'ServerPage'))
 const SystemPage     = lazy(() => named(import('./pages/SystemPage'), 'SystemPage'))
 const ErrorsPage     = lazy(() => named(import('./pages/ErrorsPage'), 'ErrorsPage'))
+const StatusPage     = lazy(() => named(import('./pages/StatusPage'), 'StatusPage'))
 
 function RouteFallback() {
   return (
@@ -53,6 +54,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/status/:token" element={<Suspense fallback={<RouteFallback />}><StatusPage /></Suspense>} />
       <Route
         path="/*"
         element={

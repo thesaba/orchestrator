@@ -229,6 +229,11 @@ export const api = {
       request<AlertRule>(`/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     remove: (id: number) => request<{ ok: true }>(`/alerts/${id}`, { method: 'DELETE' })
   },
+  statusPage: {
+    get: (siteId: number) => request<StatusPageConfig>(`/sites/${siteId}/status-page`),
+    toggle: (siteId: number, enabled: boolean) =>
+      request<StatusPageConfig>(`/sites/${siteId}/status-page`, { method: 'POST', body: JSON.stringify({ enabled }) })
+  },
   digest: {
     get: () => request<DigestConfig>('/digest'),
     update: (data: { enabled?: boolean; day?: number }) =>
@@ -598,6 +603,22 @@ export interface AccessToken {
   lastUsedAt: string | null
   expiresAt: string | null
   createdAt: string
+}
+
+export interface StatusPageConfig {
+  enabled: boolean
+  token: string | null
+  url: string | null
+}
+
+export interface PublicStatus {
+  domain: string
+  name: string
+  current: 'up' | 'down' | 'unknown'
+  overallPct: number | null
+  avgMs: number | null
+  days: { date: string; upPct: number }[]
+  incidents: { from: string; to: string }[]
 }
 
 export interface DigestData {
