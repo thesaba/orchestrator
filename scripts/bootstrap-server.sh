@@ -93,10 +93,27 @@ apti mariadb-server >/dev/null 2>&1
 systemctl enable --now mariadb >/dev/null 2>&1
 ok "MariaDB installed & running (root via unix_socket)"
 
-# ── 5. Tooling: Composer, Supervisor, Certbot, Redis ──────────────────────────
-log "[6/7] Installing Composer, Supervisor, Certbot, Redis…"
+# ── 5. Tooling: Composer, Node.js, Supervisor, Certbot, Redis ─────────────────
+log "[6/7] Installing Composer, Node.js, Supervisor, Certbot, Redis…"
 apti supervisor redis-server certbot python3-certbot-nginx >/dev/null 2>&1
 systemctl enable --now supervisor redis-server >/dev/null 2>&1 || true
+
+# Node.js 20 LTS — deploy.sh builds front-end assets (npm ci && npm run build).
+if ! command -v npm >/dev/null 2>&1; then
+  log "  → Installing Node.js 20 LTS (npm)…"
+  if curl -fsSL --max-time 60 https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1; then
+    apti nodejs >/dev/null 2>&1 || true
+  fi
+  # Fall back to the distro packages if NodeSource is unreachable.
+  command -v npm >/dev/null 2>&1 || apti nodejs npm >/dev/null 2>&1 || true
+  if command -v npm >/dev/null 2>&1; then
+    ok "Node.js installed ($(node -v 2>/dev/null), npm $(npm -v 2>/dev/null))"
+  else
+    warn "Node.js/npm could not be installed — sites needing a front-end build will fail at that step"
+  fi
+else
+  ok "Node.js already installed ($(node -v 2>/dev/null), npm $(npm -v 2>/dev/null))"
+fi
 
 if ! command -v composer >/dev/null 2>&1; then
   EXPECTED="$(curl -s --max-time 30 https://composer.github.io/installer.sig)"
