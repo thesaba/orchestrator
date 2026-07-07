@@ -12,12 +12,24 @@ ok()   { echo "[$(date '+%H:%M:%S')] ✓ $*"; }
 warn() { echo "[$(date '+%H:%M:%S')] ⚠ $*"; }
 
 export DEBIAN_FRONTEND=noninteractive
-NEEDRESTART_MODE=a; export NEEDRESTART_MODE
+# Fully suppress needrestart's interactive "which services to restart?" prompt
+# (Ubuntu 22.04+) — otherwise apt hangs forever over a non-interactive session.
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
 
 if [ "$(id -u)" != "0" ]; then
   echo "ERROR: bootstrap-server.sh must run as root." >&2
   exit 1
 fi
+
+# Belt-and-suspenders: pin needrestart to auto-restart via config too.
+if [ -d /etc/needrestart ]; then
+  mkdir -p /etc/needrestart/conf.d
+  echo '$nrconf{restart} = "a";' > /etc/needrestart/conf.d/orchestrator.conf 2>/dev/null || true
+fi
+
+# apt with non-interactive defaults + keep existing config files (never prompt).
+apti() { apt-get install -y -q -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef "$@"; }
 
 PHP_VERSIONS=(8.1 8.2 8.3 8.4 8.5)
 # Extensions installed per PHP version (php{ver}-{ext}). Covers Laravel + Filament.
@@ -30,7 +42,7 @@ log "Target: $(. /etc/os-release 2>/dev/null; echo "$PRETTY_NAME") · $(uname -m
 # ── 1. Base packages + PHP PPA ────────────────────────────────────────────────
 log "[1/7] Updating apt & installing prerequisites…"
 apt-get update -y -q
-apt-get install -y -q software-properties-common ca-certificates curl gnupg lsb-release \
+apti software-properties-common ca-certificates curl gnupg lsb-release \
   apt-transport-https unzip zip git acl >/dev/null 2>&1
 ok "Prerequisites installed"
 
@@ -53,13 +65,13 @@ for v in "${PHP_VERSIONS[@]}"; do
   pkgs=()
   for e in "${PHP_EXTS[@]}"; do pkgs+=("php${v}-${e}"); done
   log "  → PHP ${v}: installing ${#pkgs[@]} packages…"
-  if apt-get install -y -q "${pkgs[@]}" >/dev/null 2>&1; then
+  if apti "${pkgs[@]}" >/dev/null 2>&1; then
     INSTALLED_PHP+=("$v"); ok "PHP ${v} installed"
   else
     # Retry with only the core set if the full set failed (some exts vary by version)
     core=("php${v}-fpm" "php${v}-cli" "php${v}-common" "php${v}-mysql" "php${v}-mbstring" \
           "php${v}-xml" "php${v}-curl" "php${v}-zip" "php${v}-bcmath" "php${v}-gd" "php${v}-intl")
-    if apt-get install -y -q "${core[@]}" >/dev/null 2>&1; then
+    if apti "${core[@]}" >/dev/null 2>&1; then
       INSTALLED_PHP+=("$v"); warn "PHP ${v} installed with CORE extensions only (some optional exts unavailable)"
     else
       warn "PHP ${v} failed to install — skipping"
@@ -71,24 +83,24 @@ ok "PHP versions ready: ${INSTALLED_PHP[*]:-none}"
 
 # ── 3. Web server ─────────────────────────────────────────────────────────────
 log "[4/7] Installing nginx…"
-apt-get install -y -q nginx >/dev/null 2>&1
+apti nginx >/dev/null 2>&1
 systemctl enable --now nginx >/dev/null 2>&1
 ok "nginx installed & running"
 
 # ── 4. Database ───────────────────────────────────────────────────────────────
 log "[5/7] Installing MariaDB…"
-apt-get install -y -q mariadb-server >/dev/null 2>&1
+apti mariadb-server >/dev/null 2>&1
 systemctl enable --now mariadb >/dev/null 2>&1
 ok "MariaDB installed & running (root via unix_socket)"
 
 # ── 5. Tooling: Composer, Supervisor, Certbot, Redis ──────────────────────────
 log "[6/7] Installing Composer, Supervisor, Certbot, Redis…"
-apt-get install -y -q supervisor redis-server certbot python3-certbot-nginx >/dev/null 2>&1
+apti supervisor redis-server certbot python3-certbot-nginx >/dev/null 2>&1
 systemctl enable --now supervisor redis-server >/dev/null 2>&1 || true
 
 if ! command -v composer >/dev/null 2>&1; then
-  EXPECTED="$(curl -s https://composer.github.io/installer.sig)"
-  curl -sS https://getcomposer.org/installer -o /tmp/composer-setup.php
+  EXPECTED="$(curl -s --max-time 30 https://composer.github.io/installer.sig)"
+  curl -sS --max-time 60 https://getcomposer.org/installer -o /tmp/composer-setup.php
   ACTUAL="$(php -r "echo hash_file('sha384', '/tmp/composer-setup.php');" 2>/dev/null || echo x)"
   if [ "$EXPECTED" = "$ACTUAL" ] || [ -z "$EXPECTED" ]; then
     php /tmp/composer-setup.php --quiet --install-dir=/usr/local/bin --filename=composer && ok "Composer installed"

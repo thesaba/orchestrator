@@ -230,7 +230,9 @@ export const serversRoutes: FastifyPluginAsync = async (app) => {
 
     const addLine = (raw: string) => { buffer.push(raw); emitter.emit('log', raw) }
 
-    const proc = await spawnOn(ctx, 'bash', [`${synced.scriptsDir}/bootstrap-server.sh`], { tty: true })
+    // No pty: apt/needrestart must see a non-interactive session (a tty would let
+    // them try to prompt and hang forever).
+    const proc = await spawnOn(ctx, 'bash', [`${synced.scriptsDir}/bootstrap-server.sh`], { tty: false })
     proc.stdout.on('data', (c: Buffer) => addLine(c.toString()))
     proc.stderr.on('data', (c: Buffer) => addLine(c.toString()))
     proc.on('close', (code) => {
