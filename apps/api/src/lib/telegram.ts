@@ -9,6 +9,13 @@ export interface InlineKeyboard {
   inline_keyboard: { text: string; callback_data: string }[][]
 }
 
+// Persistent bottom keyboard (always-visible quick buttons) for easy navigation.
+export interface ReplyKeyboard {
+  keyboard: { text: string }[][]
+  resize_keyboard?: boolean
+  is_persistent?: boolean
+}
+
 async function tgCall<T = any>(token: string, method: string, body: Record<string, unknown>): Promise<T | null> {
   try {
     const res = await fetch(api(token, method), {
@@ -22,13 +29,13 @@ async function tgCall<T = any>(token: string, method: string, body: Record<strin
   }
 }
 
-export function tgSend(token: string, chatId: string | number, text: string, keyboard?: InlineKeyboard) {
+export function tgSend(token: string, chatId: string | number, text: string, markup?: InlineKeyboard | ReplyKeyboard) {
   return tgCall(token, 'sendMessage', {
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
     disable_web_page_preview: true,
-    ...(keyboard ? { reply_markup: keyboard } : {})
+    ...(markup ? { reply_markup: markup } : {})
   })
 }
 

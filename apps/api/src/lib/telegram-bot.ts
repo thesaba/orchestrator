@@ -1,5 +1,17 @@
 import { FastifyInstance } from 'fastify'
-import { getBotToken, tgSend, tgEdit, tgAnswerCallback, escapeHtml, InlineKeyboard } from './telegram'
+import { getBotToken, tgSend, tgEdit, tgAnswerCallback, escapeHtml, InlineKeyboard, ReplyKeyboard } from './telegram'
+
+// Persistent bottom keyboard — always-visible quick buttons so navigation never
+// requires remembering commands.
+const REPLY_KB: ReplyKeyboard = {
+  keyboard: [[{ text: '🌐 Sites' }, { text: '✅ Tasks' }], [{ text: '🖥 Status' }, { text: '❓ Help' }]],
+  resize_keyboard: true,
+  is_persistent: true
+}
+// Map the reply-keyboard labels to their slash-command equivalents.
+const LABEL_CMD: Record<string, string> = {
+  '🌐 Sites': '/sites', '✅ Tasks': '/tasks', '🖥 Status': '/status', '❓ Help': '/help'
+}
 
 // ── Identity ─────────────────────────────────────────────────────────────────
 
@@ -22,12 +34,13 @@ const canWrite = (u: BotUser) => u.role !== 'viewer'
 // duplicated logic and no new code path near the hosted sites.
 async function callApi(app: FastifyInstance, user: BotUser, method: string, url: string, payload?: unknown): Promise<{ status: number; body: any }> {
   const token = app.jwt.sign({ userId: user.userId, email: user.email, role: user.role }, { expiresIn: '2m' })
-  const res = await app.inject({
-    method: method as any,
-    url,
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    ...(payload !== undefined ? { payload: payload as any } : {})
-  })
+  const headers: Record<string, string> = { authorization: `Bearer ${token}` }
+  const opts: any = { method: method as any, url, headers }
+  // Only send a JSON body/content-type when there's an actual payload — a POST
+  // with an application/json header but no body makes Fastify try to parse an
+  // empty string and reject it as 400 Bad Request (this broke bot deploys).
+  if (payload !== undefined) { headers['content-type'] = 'application/json'; opts.payload = payload }
+  const res = await app.inject(opts)
   let body: any = null
   try { body = res.json() } catch { /* non-JSON */ }
   return { status: res.statusCode, body }
@@ -75,31 +88,37 @@ async function handleMessage(app: FastifyInstance, token: string, msg: any): Pro
 
   if (text.startsWith('/start')) {
     const code = text.split(/\s+/)[1]
-    if (code) return void tgSend(token, chatId, await tryLink(app, code, from, chatId))
+    if (code) {
+      const msg2 = await tryLink(app, code, from, chatId)
+      return void tgSend(token, chatId, msg2, REPLY_KB)
+    }
     const u = await resolveUser(app, from.id)
     return void (u
-      ? tgSend(token, chatId, `👋 Welcome back, <b>${escapeHtml(u.email)}</b>.`, mainMenu(u))
+      ? tgSend(token, chatId, `👋 Welcome back, <b>${escapeHtml(u.email)}</b>.`, REPLY_KB).then(() => tgSend(token, chatId, 'Main menu:', mainMenu(u)))
       : tgSend(token, chatId, NOT_LINKED))
   }
 
   const user = await resolveUser(app, from.id)
   if (!user) return void tgSend(token, chatId, NOT_LINKED)
 
-  if (text === '/sites')  return void tgSend(token, chatId, ...(await sitesView(app, user)))
-  if (text === '/status' || text === '/system') return void tgSend(token, chatId, ...(await systemView(app, user)))
-  if (text === '/tasks')  return void tgSend(token, chatId, ...(await tasksView(app, user)))
+  // Reply-keyboard labels behave like their slash commands.
+  const cmd = LABEL_CMD[text] ?? text
+
+  if (cmd === '/sites')  return void tgSend(token, chatId, ...(await sitesView(app, user)))
+  if (cmd === '/status' || cmd === '/system') return void tgSend(token, chatId, ...(await systemView(app, user)))
+  if (cmd === '/tasks')  return void tgSend(token, chatId, ...(await tasksView(app, user)))
+  if (cmd === '/help' || cmd === '/menu') {
+    return void tgSend(token, chatId,
+      '<b>Orchestrator bot</b>\nManage your sites & tasks from here.\n\n/sites — your sites\n/tasks — your tasks\n/task &lt;title&gt; — quick task\n/status — server status (admin)\n\nTip: use the buttons below or under each message.',
+      REPLY_KB).then(() => tgSend(token, chatId, 'Main menu:', mainMenu(user)))
+  }
   if (text.startsWith('/task ')) {
     const title = text.slice(6).trim()
     if (!title) return void tgSend(token, chatId, 'Usage: /task &lt;title&gt;')
     const { status } = await callApi(app, user, 'POST', '/api/tasks', { title })
     return void tgSend(token, chatId, status < 300 ? `✅ Task added: ${escapeHtml(title)}` : '⚠️ Could not add task')
   }
-  if (text === '/help' || text === '/menu') {
-    return void tgSend(token, chatId,
-      '<b>Orchestrator bot</b>\nManage your sites & tasks from here.\n\n/sites — your sites\n/tasks — your tasks\n/task &lt;title&gt; — quick task\n/status — server status (admin)\n/help — this menu',
-      mainMenu(user))
-  }
-  return void tgSend(token, chatId, 'Unknown command. Send /help.', mainMenu(user))
+  return void tgSend(token, chatId, 'Unknown command. Use the buttons below or /help.', mainMenu(user))
 }
 
 // ── Callback buttons ─────────────────────────────────────────────────────────
@@ -132,7 +151,18 @@ async function handleCallback(app: FastifyInstance, token: string, cq: any): Pro
         ]]
       })
     case 'deployc': return void edit(await doDeploy(app, user, Number(parts[1])), backTo(`site:${parts[1]}`))
+    case 'deploys':
+      return void edit('Deploy the latest commit <b>without running tests</b>?', {
+        inline_keyboard: [[
+          { text: '⚡ Deploy (skip tests)', callback_data: `deploysc:${parts[1]}` },
+          { text: '⬅️ Back', callback_data: `site:${parts[1]}` }
+        ]]
+      })
+    case 'deploysc': return void edit(await doDeploy(app, user, Number(parts[1]), true), backTo(`site:${parts[1]}`))
     case 'clear':   return void edit(await doClear(app, user, Number(parts[1])), backTo(`site:${parts[1]}`))
+    case 'ssl':     return void edit(...(await sslView(app, user, Number(parts[1]))))
+    case 'recent':  return void edit(...(await recentView(app, user, Number(parts[1]))))
+    case 'maint':   return void edit(await maintToggle(app, user, Number(parts[1]), parts[2] ?? 'down'), backTo(`site:${parts[1]}`))
     case 'rollback':
       return void edit('Roll back to the previous release?', {
         inline_keyboard: [[
@@ -190,16 +220,60 @@ async function siteView(app: FastifyInstance, user: BotUser, siteId: number): Pr
   if (canWrite(user)) {
     rows.push([
       { text: '🚀 Deploy', callback_data: `deploy:${siteId}` },
-      { text: '🧹 Clear cache', callback_data: `clear:${siteId}` }
+      { text: '⚡ Deploy (skip tests)', callback_data: `deploys:${siteId}` }
     ])
-    rows.push([{ text: '↩️ Rollback', callback_data: `rollback:${siteId}` }])
+    rows.push([
+      { text: '🧹 Clear cache', callback_data: `clear:${siteId}` },
+      { text: '↩️ Rollback', callback_data: `rollback:${siteId}` }
+    ])
+    rows.push([{
+      text: site.maintenanceMode ? '✅ Maintenance OFF' : '🔧 Maintenance ON',
+      callback_data: `maint:${siteId}:${site.maintenanceMode ? 'up' : 'down'}`
+    }])
   }
-  rows.push([{ text: '⬅️ Sites', callback_data: 'sites' }])
+  rows.push([
+    { text: '🔒 SSL', callback_data: `ssl:${siteId}` },
+    { text: '📜 Recent deploys', callback_data: `recent:${siteId}` }
+  ])
+  rows.push([
+    { text: '⬅️ Sites', callback_data: 'sites' },
+    { text: '🏠 Menu', callback_data: 'menu' }
+  ])
   return [lines.join('\n'), { inline_keyboard: rows }]
 }
 
-async function doDeploy(app: FastifyInstance, user: BotUser, siteId: number): Promise<string> {
-  const { status, body } = await callApi(app, user, 'POST', `/api/sites/${siteId}/deploy`)
+async function sslView(app: FastifyInstance, user: BotUser, siteId: number): Promise<[string, InlineKeyboard]> {
+  const { body } = await callApi(app, user, 'GET', `/api/sites/${siteId}/ssl`)
+  if (!body) return ['Could not read SSL info.', backTo(`site:${siteId}`)]
+  const days = body.daysLeft ?? body.daysRemaining
+  const lines = [
+    `<b>SSL</b> — ${body.sslEnabled ? '🔒 enabled' : 'not enabled'}`,
+    days != null ? `Expires in ${days} day${days === 1 ? '' : 's'}` : '',
+    body.expiresAt ? `Valid until ${new Date(body.expiresAt).toLocaleDateString()}` : ''
+  ].filter(Boolean)
+  return [lines.join('\n'), backTo(`site:${siteId}`)]
+}
+
+async function recentView(app: FastifyInstance, user: BotUser, siteId: number): Promise<[string, InlineKeyboard]> {
+  const { body } = await callApi(app, user, 'GET', '/api/sites')
+  const site = (Array.isArray(body) ? body : []).find((s: any) => s.id === siteId)
+  const deps: any[] = site?.deployments ?? []
+  if (!deps.length) return ['No deployments yet.', backTo(`site:${siteId}`)]
+  const emoji = (s: string) => s === 'success' ? '🟢' : s === 'failed' ? '🔴' : s === 'running' ? '🟡' : '⚪'
+  const text = ['<b>Recent deploys</b>', ...deps.slice(0, 6).map((d) =>
+    `${emoji(d.status)} ${d.branch}${d.commit ? ` @ ${d.commit}` : ''} · ${new Date(d.createdAt).toLocaleString()}`
+  )].join('\n')
+  return [text, backTo(`site:${siteId}`)]
+}
+
+async function maintToggle(app: FastifyInstance, user: BotUser, siteId: number, action: string): Promise<string> {
+  const { status, body } = await callApi(app, user, 'POST', `/api/sites/${siteId}/maintenance`, { action })
+  if (status >= 300) return `⚠️ ${escapeHtml(body?.error ?? 'Failed')}`
+  return action === 'down' ? '🔧 Maintenance mode ON.' : '✅ Maintenance mode OFF.'
+}
+
+async function doDeploy(app: FastifyInstance, user: BotUser, siteId: number, skip = false): Promise<string> {
+  const { status, body } = await callApi(app, user, 'POST', `/api/sites/${siteId}/deploy${skip ? '?skipTests=1' : ''}`)
   if (status >= 300) return `⚠️ ${escapeHtml(body?.error ?? 'Deploy failed to start')}`
   if (body?.queued) return '🕒 Deploy queued — it will start after the current one finishes.'
   return '🚀 Deploy started. You\'ll get a notification when it finishes.'
