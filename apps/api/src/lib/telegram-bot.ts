@@ -36,10 +36,14 @@ async function callApi(app: FastifyInstance, user: BotUser, method: string, url:
   const token = app.jwt.sign({ userId: user.userId, email: user.email, role: user.role }, { expiresIn: '2m' })
   const headers: Record<string, string> = { authorization: `Bearer ${token}` }
   const opts: any = { method: method as any, url, headers }
-  // Only send a JSON body/content-type when there's an actual payload — a POST
-  // with an application/json header but no body makes Fastify try to parse an
-  // empty string and reject it as 400 Bad Request (this broke bot deploys).
-  if (payload !== undefined) { headers['content-type'] = 'application/json'; opts.payload = payload }
+  // For non-GET requests always send a VALID JSON body ({} when there's no
+  // real payload). An application/json header with an EMPTY body makes Fastify
+  // fail to parse it and return 400 "Bad Request" — sending {} avoids that and
+  // is harmless (the deploy route reads query params, not the body).
+  if (method.toUpperCase() !== 'GET') {
+    headers['content-type'] = 'application/json'
+    opts.payload = payload ?? {}
+  }
   const res = await app.inject(opts)
   let body: any = null
   try { body = res.json() } catch { /* non-JSON */ }
