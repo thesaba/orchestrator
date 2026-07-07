@@ -1,6 +1,9 @@
 import { FastifyPluginAsync } from 'fastify'
 import path from 'path'
 import { run } from '../lib/exec'
+import { execOn } from '../lib/server-exec'
+import { serverCtxById } from '../lib/servers'
+import { ensureScriptsSynced } from '../lib/server-sync'
 
 function scriptsDir(): string {
   const dir = process.env.SCRIPTS_DIR
@@ -178,10 +181,15 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     let cleanupOk: boolean | null = null
     if (cleanup === 'true') {
       try {
-        const script = path.join(scriptsDir(), 'cleanup.sh')
-        // execFile (argv, no shell): domain/rootPath/dbName/dbUser are passed
+        // Run cleanup on whichever server the site lives on. Local → original
+        // path; remote → the synced script over SSH.
+        const synced = await ensureScriptsSynced(app.prisma, (site as any).serverId ?? null)
+        const ctx = await serverCtxById(app.prisma, (site as any).serverId ?? null)
+        const script = synced.local ? path.join(scriptsDir(), 'cleanup.sh') : `${synced.scriptsDir}/cleanup.sh`
+        // execFile/ssh (argv, no shell): domain/rootPath/dbName/dbUser are passed
         // as literal arguments and can never be interpreted as shell commands.
-        const { stdout, stderr } = await run(
+        const { stdout, stderr } = await execOn(
+          ctx,
           'bash',
           [script, site.domain, site.rootPath, site.dbName ?? '', site.dbUser ?? ''],
           { timeout: 60_000 }
