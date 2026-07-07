@@ -52,7 +52,7 @@ export function LoginPage() {
             <img
               src="/logo.svg"
               alt="Orchestrator"
-              style={{ width: 64, height: 64, marginBottom: 12, display: 'block' }}
+              style={{ width: 64, height: 64, marginBottom: 12, display: 'block', marginLeft: 'auto', marginRight: 'auto' }}
             />
             <Text as="h1" variant="headingXl" alignment="center">Orchestrator</Text>
           </div>
