@@ -49,13 +49,11 @@ export function LoginPage() {
       <div style={{ width: '100%', maxWidth: 420, padding: '0 16px' }}>
         <BlockStack gap="500">
           <div style={{ textAlign: 'center' }}>
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 56, height: 56, borderRadius: 14,
-              background: 'var(--oc-accent, #458fff)', marginBottom: 12
-            }}>
-              <span style={{ color: '#fff', fontSize: 28, fontWeight: 800 }}>O</span>
-            </div>
+            <img
+              src="/logo.svg"
+              alt="Orchestrator"
+              style={{ width: 64, height: 64, marginBottom: 12, display: 'block' }}
+            />
             <Text as="h1" variant="headingXl" alignment="center">Orchestrator</Text>
           </div>
           <Card>

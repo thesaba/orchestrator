@@ -287,7 +287,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const contextControl = (
     <div className="oc-panel-name" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-      <div className="oc-logo">O</div>
+      <div className="oc-logo"><img src="/logo.svg" alt="Orchestrator" style={{ width: 22, height: 22, display: 'block' }} /></div>
       {panelTitle}
     </div>
   )
