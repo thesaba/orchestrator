@@ -3,6 +3,8 @@ import { spawn, exec as execCb } from 'child_process'
 import { promisify } from 'util'
 import tls from 'tls'
 import os from 'os'
+import { spawnOn } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
 
 const exec = promisify(execCb)
 
@@ -497,8 +499,9 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
       if (!reply.raw.destroyed) reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
     }
 
-    // tail -f: -n 100 sends last 100 lines then follows new entries
-    const proc = spawn('tail', ['-F', '-n', '100', logPath])
+    // tail -f: -n 100 sends last 100 lines then follows new entries — on the
+    // site's own server (local → tail; remote → tail over SSH).
+    const proc = await spawnOn(await serverCtxForSite(app.prisma, site), 'tail', ['-F', '-n', '100', logPath])
 
     proc.stdout.on('data', (chunk: Buffer) => send({ line: chunk.toString() }))
     proc.stderr.on('data', (chunk: Buffer) => {

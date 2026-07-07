@@ -2,6 +2,9 @@ import { FastifyPluginAsync } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import * as nodePty from 'node-pty'
 import { existsSync } from 'fs'
+import { isLocal } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
+import { sshBaseArgs, writeKeyFile, cleanupKeyFile, shellEscape, RemoteServer } from '../lib/ssh'
 
 // Build a minimal, safe environment for the interactive shell. The API process
 // env holds secrets (JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL, PMA_BRIDGE_SECRET,
@@ -84,19 +87,25 @@ export const terminalRoutes: FastifyPluginAsync = async (app) => {
     // logged like any other privileged action — connect AND disconnect.
     app.audit('terminal.connect', { siteId, userId: payload.userId ?? null, meta: { domain: site.domain } })
 
-    // Prefer the live release dir; fall back to the site root, then to a safe
-    // default so node-pty.spawn() never throws on a missing cwd (which would
-    // crash the request instead of opening a shell).
-    const candidates = [`${site.rootPath}/current`, site.rootPath, '/tmp']
-    const cwd = candidates.find((c) => existsSync(c)) ?? '/tmp'
+    // Open the shell on the site's own server. Local → a bash pty in the live
+    // release dir; remote → an interactive SSH pty into that server.
+    const ctx = await serverCtxForSite(app.prisma, site)
+    let pty: nodePty.IPty
+    let remoteKeyPath: string | null = null
 
-    const pty = nodePty.spawn('bash', [], {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 30,
-      cwd,
-      env: buildShellEnv()
-    })
+    if (isLocal(ctx)) {
+      // Prefer the live release dir; fall back to the site root, then /tmp so
+      // node-pty.spawn() never throws on a missing cwd.
+      const candidates = [`${site.rootPath}/current`, site.rootPath, '/tmp']
+      const cwd = candidates.find((c) => existsSync(c)) ?? '/tmp'
+      pty = nodePty.spawn('bash', [], { name: 'xterm-256color', cols: 120, rows: 30, cwd, env: buildShellEnv() })
+    } else {
+      const server = ctx as RemoteServer
+      remoteKeyPath = await writeKeyFile(server)
+      const base = await sshBaseArgs(server, remoteKeyPath, true)
+      const remoteCmd = `cd ${shellEscape(`${site.rootPath}/current`)} 2>/dev/null || cd ${shellEscape(site.rootPath)} 2>/dev/null; exec bash -l`
+      pty = nodePty.spawn('ssh', [...base, remoteCmd], { name: 'xterm-256color', cols: 120, rows: 30, env: buildShellEnv() })
+    }
 
     pty.onData((data: string) => {
       if (ws.readyState === 1 /* OPEN */) {
@@ -105,6 +114,7 @@ export const terminalRoutes: FastifyPluginAsync = async (app) => {
     })
 
     pty.onExit(({ exitCode }: { exitCode: number }) => {
+      if (remoteKeyPath) { cleanupKeyFile(remoteKeyPath); remoteKeyPath = null }
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'exit', exitCode }))
         ws.close()
@@ -122,6 +132,7 @@ export const terminalRoutes: FastifyPluginAsync = async (app) => {
     ws.on('close', () => {
       app.audit('terminal.disconnect', { siteId, userId: payload.userId ?? null, meta: { domain: site.domain } })
       try { pty.kill() } catch { /* already dead */ }
+      if (remoteKeyPath) { cleanupKeyFile(remoteKeyPath); remoteKeyPath = null }
     })
   })
 }

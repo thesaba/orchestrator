@@ -57,6 +57,23 @@ export async function mkdirOn(ctx: ServerCtx, dirPath: string): Promise<void> {
   await execOn(ctx, 'bash', ['-lc', `mkdir -p ${shellEscape(dirPath)}`])
 }
 
+export interface StatInfo { size: number; mtimeMs: number; isDir: boolean; isFile: boolean }
+
+/** stat a path on the target server. Returns null if it doesn't exist. */
+export async function statOn(ctx: ServerCtx, filePath: string): Promise<StatInfo | null> {
+  if (isLocal(ctx)) {
+    try {
+      const st = await fs.stat(filePath)
+      return { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), isFile: st.isFile() }
+    } catch { return null }
+  }
+  try {
+    const { stdout } = await execOn(ctx, 'bash', ['-lc', `stat -c '%s|%Y|%F' ${shellEscape(filePath)}`])
+    const [size, mtime, kind] = stdout.trim().split('|')
+    return { size: parseInt(size, 10) || 0, mtimeMs: (parseInt(mtime, 10) || 0) * 1000, isDir: /directory/.test(kind), isFile: /regular file/.test(kind) }
+  } catch { return null }
+}
+
 export async function readdirOn(ctx: ServerCtx, dirPath: string): Promise<string[]> {
   if (isLocal(ctx)) return fs.readdir(dirPath)
   const { stdout } = await execOn(ctx, 'bash', ['-lc', `ls -1 ${shellEscape(dirPath)}`])

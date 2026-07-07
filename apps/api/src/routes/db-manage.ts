@@ -111,6 +111,20 @@ export const dbManageRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
   app.addHook('preHandler', app.requireSiteAccess())
 
+  // Safety guard: these routes talk to MySQL on 127.0.0.1 via the mysql2 driver,
+  // i.e. the PANEL host's database. For a site placed on a REMOTE server the DB
+  // lives on that server, so running here would target the wrong database. Block
+  // remote sites explicitly rather than risk operating on the panel's MySQL.
+  // (Database backup/restore for remote sites IS supported — see database.ts.)
+  app.addHook('preHandler', async (request, reply) => {
+    const idParam = (request.params as { id?: string }).id
+    if (!idParam) return
+    const site = await app.prisma.site.findUnique({ where: { id: Number(idParam) }, select: { serverId: true } as any }).catch(() => null)
+    if (site && (site as any).serverId) {
+      return reply.code(400).send({ error: 'Database management (phpMyAdmin, users, import) is not yet available for sites on remote servers. Use the Backups tab, or manage the database directly on that server.' })
+    }
+  })
+
   // GET /api/sites/:id/databases — list all databases for this site
   app.get('/:id/databases', async (request, reply) => {
     const siteId = Number((request.params as { id: string }).id)
