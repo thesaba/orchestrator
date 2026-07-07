@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
-import { promises as fs } from 'fs'
 import path from 'path'
+import { serverCtxForSite } from '../lib/servers'
+import { readFileOn, writeFileOn } from '../lib/server-fs'
 
 const LOG_LEVELS = ['emergency','alert','critical','error','warning','notice','info','debug']
 
@@ -22,13 +23,14 @@ export const logsRoutes: FastifyPluginAsync = async (app) => {
     // Also try current/storage/logs/laravel.log
     const altLogPath = path.join(site.rootPath, 'current', 'storage', 'logs', 'laravel.log')
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     let content = ''
     let usedPath = logPath
     try {
-      content = await fs.readFile(logPath, 'utf-8')
+      content = await readFileOn(ctx, logPath)
     } catch {
       try {
-        content = await fs.readFile(altLogPath, 'utf-8')
+        content = await readFileOn(ctx, altLogPath)
         usedPath = altLogPath
       } catch {
         return { entries: [], total: 0, path: logPath }
@@ -62,11 +64,12 @@ export const logsRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const logPath = path.join(site.rootPath, 'shared', 'logs', 'laravel.log')
     const altLogPath = path.join(site.rootPath, 'current', 'storage', 'logs', 'laravel.log')
     let cleared = false
     for (const p of [logPath, altLogPath]) {
-      try { await fs.writeFile(p, ''); cleared = true; break } catch {}
+      try { await writeFileOn(ctx, p, ''); cleared = true; break } catch {}
     }
     return { ok: cleared }
   })

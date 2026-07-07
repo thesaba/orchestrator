@@ -1,6 +1,9 @@
 import { FastifyInstance } from 'fastify'
 import { promises as fs } from 'fs'
 import crypto from 'crypto'
+import { execOn, isLocal, ServerCtx } from './server-exec'
+import { serverCtxById } from './servers'
+import { shellEscape } from './ssh'
 
 // Laravel log header line, e.g.
 //   [2024-01-01 12:00:00] production.ERROR: Something broke {"exception":"…"}
@@ -35,9 +38,10 @@ function normalize(msg: string): string {
 export function startLogCollector(app: FastifyInstance): void {
   const run = async () => {
     try {
-      const sites = await app.prisma.site.findMany({ where: { status: 'active' }, select: { id: true, rootPath: true } })
+      const sites = await app.prisma.site.findMany({ where: { status: 'active' } }) as any[]
       for (const site of sites) {
-        await collectSite(app, site.id, `${site.rootPath}/current/storage/logs/laravel.log`)
+        const ctx = await serverCtxById(app.prisma, site.serverId ?? null)
+        await collectSite(app, site.id, ctx, `${site.rootPath}/current/storage/logs/laravel.log`).catch(() => {/* per-site, never break the loop */})
       }
     } catch (err: unknown) {
       app.log.warn(`log collector: ${(err as Error).message}`)
@@ -48,23 +52,47 @@ export function startLogCollector(app: FastifyInstance): void {
   setTimeout(run, 20_000) // first pass shortly after boot
 }
 
-async function collectSite(app: FastifyInstance, siteId: number, logPath: string): Promise<void> {
-  let stat
-  try { stat = await fs.stat(logPath) } catch { return } // no log yet
+// Read the new tail of a site's log (from the last offset) on its own server.
+// Local: fs stat + partial read (unchanged). Remote: stat -c %s + tail -c | head.
+async function readNewLogBytes(ctx: ServerCtx, siteId: number, logPath: string): Promise<{ text: string; newOffset: number } | null> {
+  let size: number
+  if (isLocal(ctx)) {
+    try { size = (await fs.stat(logPath)).size } catch { return null }
+  } else {
+    try {
+      const { stdout } = await execOn(ctx, 'bash', ['-lc', `stat -c %s ${shellEscape(logPath)} 2>/dev/null`])
+      size = parseInt(stdout.trim(), 10)
+      if (!Number.isFinite(size)) return null
+    } catch { return null }
+  }
 
-  // First time we see this site, start ~200KB from the end so we don't ingest
-  // the whole historical log; afterwards continue from the last offset.
-  let start = offsets.get(siteId) ?? Math.max(0, stat.size - 200_000)
-  if (stat.size < start) start = 0 // file was rotated/truncated
-  if (stat.size <= start) { offsets.set(siteId, stat.size); return }
+  let start = offsets.get(siteId) ?? Math.max(0, size - 200_000)
+  if (size < start) start = 0 // rotated/truncated
+  if (size <= start) { offsets.set(siteId, size); return { text: '', newOffset: size } }
+  const toRead = Math.min(size - start, 2_000_000) // cap 2MB/pass
 
-  const fh = await fs.open(logPath, 'r')
-  try {
-    const toRead = Math.min(stat.size - start, 2_000_000) // cap 2MB per pass
-    const buf = Buffer.alloc(toRead)
-    const { bytesRead } = await fh.read(buf, 0, toRead, start)
-    const text = buf.subarray(0, bytesRead).toString('utf-8')
+  if (isLocal(ctx)) {
+    const fh = await fs.open(logPath, 'r')
+    try {
+      const buf = Buffer.alloc(toRead)
+      const { bytesRead } = await fh.read(buf, 0, toRead, start)
+      return { text: buf.subarray(0, bytesRead).toString('utf-8'), newOffset: start + bytesRead }
+    } finally { await fh.close() }
+  }
+  // Remote: base64 the byte range so arbitrary bytes survive the SSH channel.
+  const { stdout } = await execOn(ctx, 'bash',
+    ['-lc', `tail -c +${start + 1} ${shellEscape(logPath)} 2>/dev/null | head -c ${toRead} | base64 -w0`],
+    { maxBuffer: 8 * 1024 * 1024 })
+  const buf = Buffer.from(stdout.trim(), 'base64')
+  return { text: buf.toString('utf-8'), newOffset: start + buf.length }
+}
 
+async function collectSite(app: FastifyInstance, siteId: number, ctx: ServerCtx, logPath: string): Promise<void> {
+  const chunk = await readNewLogBytes(ctx, siteId, logPath)
+  if (!chunk || !chunk.text) { if (chunk) offsets.set(siteId, chunk.newOffset); return }
+  const text = chunk.text
+
+  {
     const groups = new Map<string, { level: string; exceptionClass?: string; message: string; sample: string; count: number; last: Date }>()
     for (const line of text.split('\n')) {
       const mm = HEADER.exec(line)
@@ -93,8 +121,6 @@ async function collectSite(app: FastifyInstance, siteId: number, logPath: string
         })
       }
     }
-    offsets.set(siteId, start + bytesRead)
-  } finally {
-    await fh.close()
+    offsets.set(siteId, chunk.newOffset)
   }
 }
