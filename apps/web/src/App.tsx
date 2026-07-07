@@ -25,6 +25,7 @@ const ServerPage     = lazy(() => named(import('./pages/ServerPage'), 'ServerPag
 const SystemPage     = lazy(() => named(import('./pages/SystemPage'), 'SystemPage'))
 const ErrorsPage     = lazy(() => named(import('./pages/ErrorsPage'), 'ErrorsPage'))
 const AssistantPage  = lazy(() => named(import('./pages/AssistantPage'), 'AssistantPage'))
+const ServersPage    = lazy(() => named(import('./pages/ServersPage'), 'ServersPage'))
 const StatusPage     = lazy(() => named(import('./pages/StatusPage'), 'StatusPage'))
 
 function RouteFallback() {
@@ -71,6 +72,7 @@ function AppRoutes() {
                   <Route path="/settings"   element={<SettingsPage />} />
                   <Route path="/team"       element={<AdminRoute><TeamPage /></AdminRoute>} />
                   <Route path="/server"     element={<AdminRoute><ServerPage /></AdminRoute>} />
+                  <Route path="/servers"    element={<AdminRoute><ServersPage /></AdminRoute>} />
                   <Route path="/system"     element={<AdminRoute><SystemPage /></AdminRoute>} />
                   <Route path="/errors"     element={<AdminRoute><ErrorsPage /></AdminRoute>} />
                   <Route path="/assistant"  element={<AdminRoute><AssistantPage /></AdminRoute>} />

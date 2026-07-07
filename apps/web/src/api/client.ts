@@ -126,7 +126,7 @@ export const api = {
   sites: {
     list: () => request<Site[]>('/sites'),
     get: (id: number) => request<Site>(`/sites/${id}`),
-    create: (data: { name: string; domain: string; phpVersion?: string }) =>
+    create: (data: { name: string; domain: string; phpVersion?: string; serverId?: number }) =>
       request<Site>('/sites', { method: 'POST', body: JSON.stringify(data) }),
     remove: (id: number, cleanup?: boolean) =>
       request<void | CleanupResult>(
@@ -240,6 +240,17 @@ export const api = {
     test: () => request<{ ok: true; reply: string }>('/ai/test', { method: 'POST' }),
     chat: (message: string, siteId?: number, history?: { role: 'user' | 'assistant'; content: string }[]) =>
       request<{ reply: string }>('/ai/chat', { method: 'POST', body: JSON.stringify({ message, siteId, history }) })
+  },
+  servers: {
+    list: () => request<{ servers: ServerInfo[] }>('/servers'),
+    create: (data: { name: string; host: string; port?: number; sshUser?: string; sshKey: string; notes?: string }) =>
+      request<ServerInfo>('/servers', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: number, data: { name?: string; host?: string; port?: number; sshUser?: string; sshKey?: string; notes?: string }) =>
+      request<ServerInfo>(`/servers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    remove: (id: number) => request<{ ok: true }>(`/servers/${id}`, { method: 'DELETE' }),
+    test: (id: number) => request<ServerProbe>(`/servers/${id}/test`, { method: 'POST' }),
+    testConnection: (data: { host: string; port?: number; sshUser?: string; sshKey: string }) =>
+      request<ServerProbe>('/servers/test-connection', { method: 'POST', body: JSON.stringify(data) })
   },
   siteSecurity: {
     get: (siteId: number) => request<SiteSecurity>(`/sites/${siteId}/security`),
@@ -626,6 +637,29 @@ export interface StatusPageConfig {
   enabled: boolean
   token: string | null
   url: string | null
+}
+
+export interface ServerInfo {
+  id: number
+  name: string
+  kind: 'local' | 'remote'
+  host: string | null
+  port: number
+  sshUser: string
+  hasKey: boolean
+  sshKeyFingerprint: string | null
+  status: 'unknown' | 'online' | 'offline'
+  lastSeenAt: string | null
+  scriptsSynced: boolean
+  notes: string | null
+  createdAt: string
+  siteCount: number
+}
+
+export interface ServerProbe {
+  ok: boolean
+  info?: string
+  error?: string
 }
 
 export interface AiConfig {

@@ -91,17 +91,24 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
           name:       { type: 'string', minLength: 1, maxLength: 100 },
           domain:     { type: 'string', minLength: 3, maxLength: 253,
                         pattern: '^[a-zA-Z0-9][a-zA-Z0-9\\-\\.]*[a-zA-Z0-9]$' },
-          phpVersion: { type: 'string', pattern: '^\\d+\\.\\d+$' }
+          phpVersion: { type: 'string', pattern: '^\\d+\\.\\d+$' },
+          serverId:   { type: 'integer' } // omit/null → local server (default)
         },
         additionalProperties: false
       }
     }
   }, async (request, reply) => {
-    const { name, domain, phpVersion } = request.body as {
-      name: string; domain: string; phpVersion?: string
+    const { name, domain, phpVersion, serverId } = request.body as {
+      name: string; domain: string; phpVersion?: string; serverId?: number
+    }
+    // If a remote server is chosen, validate it exists and is remote. null/omitted
+    // stays local, so the default behaviour is exactly as before.
+    if (serverId) {
+      const server = await (app.prisma as any).server.findUnique({ where: { id: serverId } }).catch(() => null)
+      if (!server) return reply.code(400).send({ error: 'Selected server not found' })
     }
     const site = await app.prisma.site.create({
-      data: { name, domain, phpVersion: phpVersion ?? '8.2', rootPath: `/var/www/sites/${domain}` }
+      data: { name, domain, phpVersion: phpVersion ?? '8.2', rootPath: `/var/www/sites/${domain}`, ...(serverId ? { serverId } : {}) } as any
     })
     app.audit('site.created', { siteId: site.id, meta: { domain, phpVersion: site.phpVersion } })
     reply.code(201)

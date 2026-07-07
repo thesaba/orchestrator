@@ -14,7 +14,7 @@ import {
 } from '@shopify/polaris'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, SiteTemplate } from '../api/client'
+import { api, SiteTemplate, ServerInfo } from '../api/client'
 import { ProvisionLog } from '../components/ProvisionLog'
 import { domainToSlug, generatePassword } from '../utils/helpers'
 import { phpVersionOptions, DEFAULT_PHP_VERSION } from '../utils/php'
@@ -33,6 +33,14 @@ export function ProvisionPage() {
   const [dbUser, setDbUser] = useState('')
   const [dbPassword, setDbPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
+  const [servers, setServers] = useState<ServerInfo[]>([])
+  const [serverId, setServerId] = useState('') // '' = local (default)
+
+  // Load servers so a target can be chosen when remotes exist. If only the
+  // local server is present, the picker is hidden and behaviour is unchanged.
+  useEffect(() => {
+    api.servers.list().then((r) => setServers(r.servers)).catch(() => {})
+  }, [])
 
   // Process state
   const [step, setStep] = useState<Step>('form')
@@ -60,7 +68,7 @@ export function ProvisionPage() {
 
     try {
       // 1. Create site record
-      const site = await api.sites.create({ name: name || domain, domain, phpVersion })
+      const site = await api.sites.create({ name: name || domain, domain, phpVersion, ...(serverId ? { serverId: Number(serverId) } : {}) })
 
       // 2. Start provisioning
       await api.provision.start(site.id, { dbName, dbUser, dbPassword, template })
@@ -133,6 +141,19 @@ export function ProvisionPage() {
                     onChange={setPhpVersion}
                   />
                 </FormLayout.Group>
+
+                {servers.length > 1 && (
+                  <Select
+                    label="Target server"
+                    options={servers.map((s) => ({
+                      label: s.kind === 'local' ? `${s.name} (local)` : `${s.name} — ${s.host}${s.status !== 'online' ? ` · ${s.status}` : ''}`,
+                      value: s.kind === 'local' ? '' : String(s.id)
+                    }))}
+                    value={serverId}
+                    onChange={setServerId}
+                    helpText="Where this site will be provisioned. Defaults to the local server."
+                  />
+                )}
 
                 <Divider />
 
