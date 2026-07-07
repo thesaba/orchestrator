@@ -1,11 +1,9 @@
 import { FastifyPluginAsync } from 'fastify'
-import { promises as fs } from 'fs'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import crypto from 'crypto'
 import { encryptSecret, decryptSecret } from '../lib/crypto'
-
-const exec = promisify(execCb)
+import { execOn, ServerCtx } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
+import { readFileOn, writeFileOn, copyFileOn, readdirOn } from '../lib/server-fs'
 
 export const configRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
@@ -19,9 +17,10 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const configPath = `/etc/nginx/sites-available/${site.domain}`
     try {
-      const content = await fs.readFile(configPath, 'utf-8')
+      const content = await readFileOn(ctx, configPath)
       return { content, path: configPath }
     } catch {
       // Return template when file doesn't exist (site not provisioned yet or dev mode)
@@ -47,26 +46,27 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const { content } = request.body as { content: string }
     const configPath = `/etc/nginx/sites-available/${site.domain}`
     const backupPath = `${configPath}.bak`
 
     // Backup existing file
-    try { await fs.copyFile(configPath, backupPath) } catch { /* first save */ }
+    try { await copyFileOn(ctx, configPath, backupPath) } catch { /* first save */ }
 
     // Write new config
-    await fs.writeFile(configPath, content, 'utf-8')
+    await writeFileOn(ctx, configPath, content)
 
     // Ensure symlink
     try {
-      await exec(`ln -sf ${configPath} /etc/nginx/sites-enabled/${site.domain}`)
+      await execOn(ctx, 'bash', ['-lc', `ln -sf ${configPath} /etc/nginx/sites-enabled/${site.domain}`])
     } catch { /* ignore if already linked */ }
 
     // Test — if it fails, restore and return error
     try {
-      await exec('nginx -t 2>&1')
+      await execOn(ctx, 'bash', ['-lc', 'nginx -t 2>&1'])
     } catch (err: unknown) {
-      try { await fs.copyFile(backupPath, configPath) } catch { /* nothing */ }
+      try { await copyFileOn(ctx, backupPath, configPath) } catch { /* nothing */ }
       const msg = (err as { stderr?: string; stdout?: string; message?: string })
       return reply.code(400).send({
         error: 'Nginx config test failed — previous config restored.',
@@ -76,7 +76,7 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
 
     // Reload
     try {
-      await exec('systemctl reload nginx')
+      await execOn(ctx, 'bash', ['-lc', 'systemctl reload nginx'])
     } catch (err: unknown) {
       const msg = (err as { stderr?: string; message?: string })
       return reply.code(500).send({
@@ -96,9 +96,10 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const envPath = `${site.rootPath}/shared/.env`
     try {
-      const content = await fs.readFile(envPath, 'utf-8')
+      const content = await readFileOn(ctx, envPath)
       return { content, path: envPath }
     } catch {
       return {
@@ -123,6 +124,7 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const { content } = request.body as { content: string }
     const envPath = `${site.rootPath}/shared/.env`
     const uid = (request.user as { userId?: number }).userId ?? null
@@ -133,15 +135,15 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     try {
       const count = await app.prisma.envVersion.count({ where: { siteId: site.id } })
       if (count === 0) {
-        const old = await fs.readFile(envPath, 'utf-8').catch(() => '')
+        const old = await readFileOn(ctx, envPath).catch(() => '')
         if (old.trim()) {
           await app.prisma.envVersion.create({ data: { siteId: site.id, content: encryptSecret(old), note: 'Before first panel edit', createdById: uid } })
         }
       }
     } catch { /* ignore */ }
 
-    try { await fs.copyFile(envPath, `${envPath}.bak`) } catch { /* first save */ }
-    await fs.writeFile(envPath, content, 'utf-8')
+    try { await copyFileOn(ctx, envPath, `${envPath}.bak`) } catch { /* first save */ }
+    await writeFileOn(ctx, envPath, content)
 
     // Snapshot the newly-saved content, then prune to the latest 50 versions.
     try {
@@ -184,16 +186,17 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     const v = await app.prisma.envVersion.findUnique({ where: { id: vid } })
     if (!v || v.siteId !== siteId) return reply.code(404).send({ error: 'Version not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const content = decryptSecret(v.content) ?? ''
     const envPath = `${site.rootPath}/shared/.env`
 
     // Snapshot the current file first, so a restore is itself reversible.
     try {
-      const cur = await fs.readFile(envPath, 'utf-8')
+      const cur = await readFileOn(ctx, envPath)
       await app.prisma.envVersion.create({ data: { siteId, content: encryptSecret(cur), note: 'Before restore', createdById: uid } })
     } catch { /* ignore */ }
-    try { await fs.copyFile(envPath, `${envPath}.bak`) } catch { /* */ }
-    await fs.writeFile(envPath, content, 'utf-8')
+    try { await copyFileOn(ctx, envPath, `${envPath}.bak`) } catch { /* */ }
+    await writeFileOn(ctx, envPath, content)
 
     app.audit('env.restored', { req: request, siteId, meta: { versionId: vid } })
     return { ok: true, content, message: '.env restored. Re-deploy to apply.' }
@@ -207,7 +210,7 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
-    const available = await detectPhpVersions()
+    const available = await detectPhpVersions(await serverCtxForSite(app.prisma, site))
     return { current: site.phpVersion, available }
   })
 
@@ -237,7 +240,8 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: `Site is already using PHP ${version}.` })
     }
 
-    const available = await detectPhpVersions()
+    const ctx = await serverCtxForSite(app.prisma, site)
+    const available = await detectPhpVersions(ctx)
     if (!available.includes(version)) {
       return reply.code(400).send({ error: `PHP ${version} is not installed on this server.` })
     }
@@ -246,7 +250,7 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     let configContent: string
 
     try {
-      configContent = await fs.readFile(configPath, 'utf-8')
+      configContent = await readFileOn(ctx, configPath)
     } catch {
       // If config doesn't exist yet just update DB
       await app.prisma.site.update({ where: { id: siteId }, data: { phpVersion: version } })
@@ -267,13 +271,13 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const backupPath = `${configPath}.bak`
-    try { await fs.copyFile(configPath, backupPath) } catch { /* first time */ }
-    await fs.writeFile(configPath, updated, 'utf-8')
+    try { await copyFileOn(ctx, configPath, backupPath) } catch { /* first time */ }
+    await writeFileOn(ctx, configPath, updated)
 
     try {
-      await exec('nginx -t 2>&1')
+      await execOn(ctx, 'bash', ['-lc', 'nginx -t 2>&1'])
     } catch (err: unknown) {
-      try { await fs.copyFile(backupPath, configPath) } catch { /* nothing */ }
+      try { await copyFileOn(ctx, backupPath, configPath) } catch { /* nothing */ }
       const msg = err as { stderr?: string; stdout?: string; message?: string }
       return reply.code(400).send({
         error: 'Nginx config test failed — previous config restored.',
@@ -281,7 +285,7 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
       })
     }
 
-    await exec('systemctl reload nginx')
+    await execOn(ctx, 'bash', ['-lc', 'systemctl reload nginx'])
     await app.prisma.site.update({ where: { id: siteId }, data: { phpVersion: version } })
     app.audit('php.switched', { siteId, meta: { domain: site.domain, from: site.phpVersion, to: version } })
 
@@ -291,12 +295,12 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-async function detectPhpVersions(): Promise<string[]> {
+async function detectPhpVersions(ctx: ServerCtx): Promise<string[]> {
   const versions = new Set<string>()
 
   // Method 1: /etc/php/<version> directories (Debian/Ubuntu)
   try {
-    const entries = await fs.readdir('/etc/php')
+    const entries = await readdirOn(ctx, '/etc/php')
     for (const e of entries) {
       if (/^\d+\.\d+$/.test(e)) versions.add(e)
     }
@@ -305,7 +309,7 @@ async function detectPhpVersions(): Promise<string[]> {
   // Method 2: update-alternatives (covers non-standard installs)
   if (versions.size === 0) {
     try {
-      const { stdout } = await exec('update-alternatives --list php 2>/dev/null || true')
+      const { stdout } = await execOn(ctx, 'bash', ['-lc', 'update-alternatives --list php 2>/dev/null || true'])
       for (const line of stdout.split('\n')) {
         const m = line.match(/php(\d+\.\d+)/)
         if (m) versions.add(m[1])
@@ -317,7 +321,7 @@ async function detectPhpVersions(): Promise<string[]> {
   if (versions.size === 0) {
     for (const v of ['8.0', '8.1', '8.2', '8.3', '8.4']) {
       try {
-        await exec(`which php${v}`)
+        await execOn(ctx, 'bash', ['-lc', `which php${v}`])
         versions.add(v)
       } catch { /* not installed */ }
     }
