@@ -1,9 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import path from 'path'
-
-const exec = promisify(execCb)
+import { execOn } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
 
 export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
@@ -43,7 +41,8 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         cmd = `${php} "${artisan}" up 2>&1`
       }
 
-      const { stdout } = await exec(cmd, { timeout: 15_000 })
+      const ctx = await serverCtxForSite(app.prisma, site)
+      const { stdout } = await execOn(ctx, 'bash', ['-lc', cmd], { timeout: 15_000 })
 
       await app.prisma.site.update({
         where: { id: siteId },

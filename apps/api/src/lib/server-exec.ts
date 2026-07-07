@@ -33,7 +33,11 @@ export async function execOn(
   opts: ExecOnOpts = {}
 ): Promise<{ stdout: string; stderr: string }> {
   if (isLocal(server)) {
-    return run(file, args, opts)
+    // Locally, a provided env must be MERGED with process.env (so PATH etc. are
+    // preserved) — matching the original exec()/spawn() behaviour. Remote injects
+    // only the extra vars into the remote command (the remote shell keeps its PATH).
+    const localOpts = opts.env ? { ...opts, env: { ...process.env, ...opts.env } } : opts
+    return run(file, args, localOpts)
   }
   const srv = server as RemoteServer
   const keyPath = await writeKeyFile(srv)

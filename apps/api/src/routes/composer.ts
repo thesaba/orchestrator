@@ -1,9 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import path from 'path'
-
-const exec = promisify(execCb)
+import { execOn } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
 
 export const composerRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
@@ -16,12 +14,13 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const cwd = path.join(site.rootPath, 'current')
 
     const php = `php${site.phpVersion}`
     try {
-      const { stdout } = await exec(
-        `${php} $(command -v composer) outdated --no-interaction --format=json --no-ansi 2>/dev/null || ${php} $(command -v composer) outdated --no-interaction --format=json 2>/dev/null`,
+      const { stdout } = await execOn(ctx, 'bash', ['-lc',
+        `${php} $(command -v composer) outdated --no-interaction --format=json --no-ansi 2>/dev/null || ${php} $(command -v composer) outdated --no-interaction --format=json 2>/dev/null`],
         { cwd, timeout: 60_000 }
       )
       const parsed = JSON.parse(stdout)
@@ -56,6 +55,7 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
     if (site.status !== 'active') return reply.code(400).send({ error: 'Site is not active' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const { package: pkg } = (request.body ?? {}) as { package?: string }
     const cwd = path.join(site.rootPath, 'current')
     const php = `php${site.phpVersion}`
@@ -65,7 +65,7 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
       : `${php} $(command -v composer) update --no-interaction --no-ansi --ignore-platform-reqs 2>&1`
 
     try {
-      const { stdout } = await exec(cmd, { cwd, timeout: 300_000, env: { ...process.env, COMPOSER_ALLOW_SUPERUSER: '1' } })
+      const { stdout } = await execOn(ctx, 'bash', ['-lc', cmd], { cwd, timeout: 300_000, env: { COMPOSER_ALLOW_SUPERUSER: '1' } })
       app.audit('composer.update', { siteId: site.id, meta: { package: pkg ?? 'all', domain: site.domain } })
       return { ok: true, output: stdout }
     } catch (err: unknown) {
@@ -81,10 +81,11 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const cwd = path.join(site.rootPath, 'current')
     const php = `php${site.phpVersion}`
     try {
-      const { stdout } = await exec(`${php} $(command -v composer) show --self --format=json --no-ansi 2>/dev/null`, {
+      const { stdout } = await execOn(ctx, 'bash', ['-lc', `${php} $(command -v composer) show --self --format=json --no-ansi 2>/dev/null`], {
         cwd, timeout: 15_000
       })
       const info = JSON.parse(stdout)

@@ -1,9 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
-import { exec as execCb } from 'child_process'
-import { promisify } from 'util'
 import path from 'path'
-
-const exec = promisify(execCb)
+import { execOn, ServerCtx } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
 
 export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
@@ -13,6 +11,9 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
     const artisanPath = path.join(rootPath, 'current', 'artisan')
     return `php${phpVersion} "${artisanPath}" ${cmd} 2>&1`
   }
+  // Run a shell command on the site's server (local → in-process, remote → SSH).
+  const sh = (ctx: ServerCtx, cmd: string, opts: { cwd?: string; timeout?: number } = {}) =>
+    execOn(ctx, 'bash', ['-lc', cmd], opts)
 
   // GET /:id/queue/stats — pending + failed counts (read-only; no side effects).
   // Returns nulls when the DB queue tables aren't present (e.g. redis/sync queue).
@@ -21,11 +22,12 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     const phpScript = `echo json_encode(['pending'=>DB::table('jobs')->count(),'failed'=>DB::table('failed_jobs')->count()]);`
     const cmd = `echo '<?php ${phpScript}' | php${site.phpVersion} "${path.join(site.rootPath, 'current', 'artisan')}" tinker --no-interaction 2>/dev/null`
     try {
-      const { stdout } = await exec(cmd, { cwd: path.join(site.rootPath, 'current'), timeout: 15_000 })
+      const { stdout } = await sh(ctx, cmd, { cwd: path.join(site.rootPath, 'current'), timeout: 15_000 })
       const m = stdout.match(/(\{[^{}]*\})/s)
       const stats = m ? JSON.parse(m[1]) : {}
       return { pending: Number.isFinite(+stats.pending) ? Number(stats.pending) : null, failed: Number.isFinite(+stats.failed) ? Number(stats.failed) : null }
@@ -40,16 +42,14 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     // Use artisan tinker to dump failed_jobs as JSON
     const phpScript = `echo json_encode(DB::table('failed_jobs')->orderByDesc('failed_at')->limit(50)->get()->toArray());`
     const cmd = `echo '<?php ${phpScript}' | php${site.phpVersion} "${path.join(site.rootPath, 'current', 'artisan')}" tinker --no-interaction 2>/dev/null`
 
     try {
-      const { stdout } = await exec(cmd, {
-        cwd: path.join(site.rootPath, 'current'),
-        timeout: 15_000
-      })
+      const { stdout } = await sh(ctx, cmd, { cwd: path.join(site.rootPath, 'current'), timeout: 15_000 })
       // tinker outputs the value, might have extra output before it
       const match = stdout.match(/(\[.*\])/s)
       const jobs = match ? JSON.parse(match[1]) : []
@@ -57,9 +57,7 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
     } catch {
       // Fallback: parse artisan queue:failed text output
       try {
-        const { stdout: listOut } = await exec(artisan(site.rootPath, site.phpVersion, 'queue:failed'), {
-          timeout: 15_000
-        })
+        const { stdout: listOut } = await sh(ctx, artisan(site.rootPath, site.phpVersion, 'queue:failed'), { timeout: 15_000 })
         const lines = listOut.split('\n').filter((l) => l.includes('|'))
         const jobs = lines.slice(2).map((line) => {
           const parts = line.split('|').map((s) => s.trim()).filter(Boolean)
@@ -80,15 +78,13 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string; jobId: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
     const { jobId } = request.params as { jobId: string }
 
     if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) return reply.code(400).send({ error: 'Invalid job ID' })
 
     try {
-      const { stdout } = await exec(
-        artisan(site.rootPath, site.phpVersion, `queue:retry ${jobId}`),
-        { timeout: 15_000 }
-      )
+      const { stdout } = await sh(ctx, artisan(site.rootPath, site.phpVersion, `queue:retry ${jobId}`), { timeout: 15_000 })
       app.audit('queue.retry', { siteId: site.id, meta: { jobId } })
       return { ok: true, output: stdout }
     } catch (err: unknown) {
@@ -102,12 +98,13 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string; jobId: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
     const { jobId } = request.params as { jobId: string }
 
     if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) return reply.code(400).send({ error: 'Invalid job ID' })
 
     try {
-      await exec(artisan(site.rootPath, site.phpVersion, `queue:forget ${jobId}`), { timeout: 10_000 })
+      await sh(ctx, artisan(site.rootPath, site.phpVersion, `queue:forget ${jobId}`), { timeout: 10_000 })
       return { ok: true }
     } catch (err: unknown) {
       return reply.code(500).send({ error: (err as Error).message })
@@ -120,12 +117,10 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     try {
-      const { stdout } = await exec(
-        artisan(site.rootPath, site.phpVersion, 'queue:flush'),
-        { timeout: 10_000 }
-      )
+      const { stdout } = await sh(ctx, artisan(site.rootPath, site.phpVersion, 'queue:flush'), { timeout: 10_000 })
       app.audit('queue.flush', { siteId: site.id, meta: { domain: site.domain } })
       return { ok: true, output: stdout }
     } catch (err: unknown) {
@@ -139,12 +134,10 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
       where: { id: Number((request.params as { id: string }).id) }
     })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+    const ctx = await serverCtxForSite(app.prisma, site)
 
     try {
-      const { stdout } = await exec(
-        artisan(site.rootPath, site.phpVersion, 'queue:retry all'),
-        { timeout: 15_000 }
-      )
+      const { stdout } = await sh(ctx, artisan(site.rootPath, site.phpVersion, 'queue:retry all'), { timeout: 15_000 })
       app.audit('queue.retry_all', { siteId: site.id })
       return { ok: true, output: stdout }
     } catch (err: unknown) {

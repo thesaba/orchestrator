@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import { EventEmitter } from 'events'
-import { spawn } from 'child_process'
+import { spawnOn, isLocal } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
 
 // Only commands in this map can be executed
 const ALLOWED: Record<string, { label: string; description: string; group: string }> = {
@@ -74,9 +75,11 @@ export const artisanRoutes: FastifyPluginAsync = async (app) => {
     const artisanPath = `${site.rootPath}/current/artisan`
     const phpBin = `php${site.phpVersion}`
 
-    const child = spawn(phpBin, [artisanPath, command, '--no-interaction', '--ansi'], {
+    const ctx = await serverCtxForSite(app.prisma, site)
+    const child = await spawnOn(ctx, phpBin, [artisanPath, command, '--no-interaction', '--ansi'], {
       cwd: `${site.rootPath}/current`,
-      env: { ...process.env, TERM: 'xterm-256color' }
+      env: { TERM: 'xterm-256color' },
+      tty: !isLocal(ctx)
     })
 
     child.stdout.on('data', (chunk) =>
