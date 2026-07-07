@@ -14,6 +14,26 @@ export const failedJobsRoutes: FastifyPluginAsync = async (app) => {
     return `php${phpVersion} "${artisanPath}" ${cmd} 2>&1`
   }
 
+  // GET /:id/queue/stats — pending + failed counts (read-only; no side effects).
+  // Returns nulls when the DB queue tables aren't present (e.g. redis/sync queue).
+  app.get('/:id/queue/stats', async (request, reply) => {
+    const site = await app.prisma.site.findUnique({
+      where: { id: Number((request.params as { id: string }).id) }
+    })
+    if (!site) return reply.code(404).send({ error: 'Site not found' })
+
+    const phpScript = `echo json_encode(['pending'=>DB::table('jobs')->count(),'failed'=>DB::table('failed_jobs')->count()]);`
+    const cmd = `echo '<?php ${phpScript}' | php${site.phpVersion} "${path.join(site.rootPath, 'current', 'artisan')}" tinker --no-interaction 2>/dev/null`
+    try {
+      const { stdout } = await exec(cmd, { cwd: path.join(site.rootPath, 'current'), timeout: 15_000 })
+      const m = stdout.match(/(\{[^{}]*\})/s)
+      const stats = m ? JSON.parse(m[1]) : {}
+      return { pending: Number.isFinite(+stats.pending) ? Number(stats.pending) : null, failed: Number.isFinite(+stats.failed) ? Number(stats.failed) : null }
+    } catch {
+      return { pending: null, failed: null }
+    }
+  })
+
   // GET /:id/failed-jobs
   app.get('/:id/failed-jobs', async (request, reply) => {
     const site = await app.prisma.site.findUnique({

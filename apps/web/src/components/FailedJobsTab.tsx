@@ -3,6 +3,13 @@ import { useEffect, useState } from 'react'
 import { failedJobsApi, FailedJob } from '../api/client'
 import { useToast } from '../context/toast'
 
+// Best-effort short job class name from either the column or the payload.
+function jobClassOf(j: FailedJob): string {
+  let c = j.class ?? ''
+  if (!c && j.payload) { try { c = JSON.parse(j.payload)?.displayName ?? '' } catch { /* ignore */ } }
+  return (c.split('\\').pop() || c || 'unknown')
+}
+
 export function FailedJobsTab({ siteId }: { siteId: number }) {
   const [jobs,      setJobs]      = useState<FailedJob[]>([])
   const [loading,   setLoading]   = useState(false)
@@ -11,10 +18,12 @@ export function FailedJobsTab({ siteId }: { siteId: number }) {
   const [deleting,  setDeleting]  = useState<string | null>(null)
   const [flushing,  setFlushing]  = useState(false)
   const [showJob,   setShowJob]   = useState<FailedJob | null>(null)
+  const [stats,     setStats]     = useState<{ pending: number | null; failed: number | null } | null>(null)
   const showToast = useToast()
 
   const load = () => {
     setLoading(true); setError('')
+    failedJobsApi.queueStats(siteId).then(setStats).catch(() => setStats(null))
     failedJobsApi.list(siteId)
       .then((r) => setJobs(r.jobs))
       .catch((e) => setError(e.message ?? 'Failed to list failed jobs'))
@@ -66,8 +75,9 @@ export function FailedJobsTab({ siteId }: { siteId: number }) {
     <BlockStack gap="500">
       <InlineStack align="space-between" blockAlign="center">
         <InlineStack gap="300" blockAlign="center">
-          <Text as="h2" variant="headingMd">Failed Jobs</Text>
-          {jobs.length > 0 && <Badge tone="critical">{String(jobs.length)}</Badge>}
+          <Text as="h2" variant="headingMd">Queue</Text>
+          {stats?.pending != null && <Badge tone={stats.pending > 0 ? 'attention' : 'success'}>{`${stats.pending} pending`}</Badge>}
+          <Badge tone={jobs.length > 0 ? 'critical' : 'success'}>{`${stats?.failed ?? jobs.length} failed`}</Badge>
         </InlineStack>
         <InlineStack gap="200">
           <Button onClick={load} loading={loading}>Refresh</Button>
@@ -82,6 +92,18 @@ export function FailedJobsTab({ siteId }: { siteId: number }) {
 
       {error && <Banner tone="critical" onDismiss={() => setError('')}>{error}</Banner>}
 
+      {jobs.length > 0 && (() => {
+        const byClass = new Map<string, number>()
+        for (const j of jobs) byClass.set(jobClassOf(j), (byClass.get(jobClassOf(j)) ?? 0) + 1)
+        const top = [...byClass.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
+        return (
+          <InlineStack gap="150" wrap>
+            <Text as="span" variant="bodySm" tone="subdued">Failing by class:</Text>
+            {top.map(([cls, n]) => <Badge key={cls}>{`${cls} ×${n}`}</Badge>)}
+          </InlineStack>
+        )
+      })()}
+
       {loading ? (
         <InlineStack align="center"><Spinner size="small" /></InlineStack>
       ) : jobs.length === 0 ? (
@@ -93,13 +115,9 @@ export function FailedJobsTab({ siteId }: { siteId: number }) {
             headings={['ID', 'Job Class', 'Queue', 'Failed At', 'Actions']}
             rows={jobs.map((j) => {
               const id = String(j.id)
-              let jobClass = j.class ?? '—'
-              if (!jobClass && j.payload) {
-                try { jobClass = JSON.parse(j.payload)?.displayName ?? '—' } catch { /* ignore */ }
-              }
               return [
                 <Text as="span" variant="bodySm" fontWeight="semibold">{id}</Text>,
-                <Text as="span" variant="bodySm">{jobClass.split('\\').pop() ?? jobClass}</Text>,
+                <Text as="span" variant="bodySm">{jobClassOf(j)}</Text>,
                 j.queue ?? 'default',
                 j.failed_at ? new Date(j.failed_at).toLocaleString() : '—',
                 <InlineStack gap="200">

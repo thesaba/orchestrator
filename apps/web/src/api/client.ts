@@ -867,7 +867,9 @@ export const failedJobsApi = {
   delete:   (siteId: number, jobId: string) =>
     request<{ ok: boolean }>(`/sites/${siteId}/failed-jobs/${jobId}`, { method: 'DELETE' }),
   flush:    (siteId: number) =>
-    request<{ ok: boolean; output: string }>(`/sites/${siteId}/failed-jobs`, { method: 'DELETE' })
+    request<{ ok: boolean; output: string }>(`/sites/${siteId}/failed-jobs`, { method: 'DELETE' }),
+  queueStats: (siteId: number) =>
+    request<{ pending: number | null; failed: number | null }>(`/sites/${siteId}/queue/stats`)
 }
 
 export interface FailedJob {
