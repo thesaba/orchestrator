@@ -214,6 +214,52 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
     return getProcessStats(limit)
   })
 
+  // ── GET /apm — response-time percentiles + uptime per monitored site ──────
+  // Derived from the uptime checks already collected (synthetic monitoring), so
+  // it's read-only and adds no load to the sites themselves.
+  app.get('/apm', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: { hours: { type: 'integer', minimum: 1, maximum: 168 } },
+        additionalProperties: false
+      }
+    }
+  }, async (request) => {
+    const { hours = 24 } = request.query as { hours?: number }
+    const since = new Date(Date.now() - hours * 3_600_000)
+    const sites = await app.prisma.site.findMany({ where: { uptimeMonitor: true }, select: { id: true, domain: true } })
+
+    const results = await Promise.all(sites.map(async (site: { id: number; domain: string }) => {
+      const checks = await app.prisma.uptimeCheck.findMany({
+        where: { siteId: site.id, checkedAt: { gte: since } },
+        select: { status: true, responseMs: true }
+      })
+      const total = checks.length
+      const up = checks.filter((c: { status: string }) => c.status === 'up').length
+      const rts = checks
+        .map((c: { responseMs: number | null }) => c.responseMs)
+        .filter((n: number | null): n is number => typeof n === 'number')
+        .sort((a: number, b: number) => a - b)
+      const pct = (p: number) => (rts.length ? rts[Math.min(rts.length - 1, Math.floor(p * rts.length))] : null)
+      return {
+        siteId: site.id,
+        domain: site.domain,
+        samples: total,
+        uptimePct: total ? Math.round((up / total) * 1000) / 10 : null,
+        avg: rts.length ? Math.round(rts.reduce((a: number, b: number) => a + b, 0) / rts.length) : null,
+        p50: pct(0.5),
+        p95: pct(0.95),
+        p99: pct(0.99),
+        max: rts.length ? rts[rts.length - 1] : null
+      }
+    }))
+
+    // Slowest (highest p95) first, so problems surface at the top.
+    results.sort((a, b) => (b.p95 ?? 0) - (a.p95 ?? 0))
+    return { hours, sites: results }
+  })
+
   // ── GET /services ────────────────────────────────────────────────────────
   app.get('/services', async () => {
     return Promise.all(

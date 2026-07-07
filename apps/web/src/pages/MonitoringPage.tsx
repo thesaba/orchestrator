@@ -5,6 +5,7 @@ import { SystemStatsCard }    from '../components/SystemStatsCard'
 import { MetricsHistoryCard } from '../components/MetricsHistoryCard'
 import { TopProcessesCard }   from '../components/TopProcessesCard'
 import { AlertRulesCard }     from '../components/AlertRulesCard'
+import { ApmCard }            from '../components/ApmCard'
 import { useAuth }            from '../context/AuthContext'
 import { ServiceControlCard } from '../components/ServiceControlCard'
 import { LogTailViewer }      from '../components/LogTailViewer'
@@ -76,6 +77,7 @@ export function MonitoringPage() {
     { id: 'uptime',         title: 'Uptime monitor', defaultWidth: 'half', node: <UptimeCard /> },
     { id: 'ssl',            title: 'SSL expiry',     defaultWidth: 'half', node: <SslExpiryCard /> },
     ...(isAdmin ? [{ id: 'alert-rules', title: 'Alert rules', defaultWidth: 'half' as const, node: <AlertRulesCard /> }] : []),
+    { id: 'apm',            title: 'Performance (response times)', defaultWidth: 'full', node: <ApmCard /> },
     { id: 'top-processes',  title: 'Top services by resource use', defaultWidth: 'full', node: <TopProcessesCard /> },
     { id: 'services',       title: 'Service control', defaultWidth: 'full', node: <ServiceControlCard services={services} onRefresh={refreshServices} /> },
     {

@@ -188,7 +188,9 @@ export const api = {
     history: (hours = 24) =>
       request<MetricsHistory>(`/monitor/history?hours=${hours}`),
     processes: (limit = 8) =>
-      request<ProcessStats>(`/monitor/processes?limit=${limit}`)
+      request<ProcessStats>(`/monitor/processes?limit=${limit}`),
+    apm: (hours = 24) =>
+      request<ApmResult>(`/monitor/apm?hours=${hours}`)
   },
   system: {
     info: () => request<SystemInfo>('/system/info')
@@ -560,6 +562,23 @@ export interface DashboardPreset {
   name: string
   config: string
   updatedAt: string
+}
+
+export interface ApmSite {
+  siteId: number
+  domain: string
+  samples: number
+  uptimePct: number | null
+  avg: number | null
+  p50: number | null
+  p95: number | null
+  p99: number | null
+  max: number | null
+}
+
+export interface ApmResult {
+  hours: number
+  sites: ApmSite[]
 }
 
 export interface SystemInfo {
