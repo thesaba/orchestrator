@@ -24,6 +24,7 @@ import { api, ArtisanCommand, Deployment, Release, Site, maintenanceApi, logsApi
 import { phpVersionOptions } from '../utils/php'
 import { ProvisionLog }      from '../components/ProvisionLog'
 import { DeployReviewModal }  from '../components/DeployReview'
+import { LogConsole }         from '../components/LogConsole'
 import { ConfigEditor }      from '../components/ConfigEditor'
 import { WorkersTab }        from '../components/WorkersTab'
 import { SslTab }            from '../components/SslTab'
@@ -1161,9 +1162,7 @@ export function SiteDetailPage() {
         title={logModal ? `Deploy log — ${logModal.branch}@${logModal.commit ?? '?'}` : ''} size="large">
         <Modal.Section>
           {logModal?.log ? (
-            <div className="oc-terminal" style={{ maxHeight: '60vh' }}>
-              {logModal.log}
-            </div>
+            <LogConsole lines={[logModal.log]} minHeight={200} maxHeight={520} />
           ) : (
             <Text as="p" tone="subdued">No log available.</Text>
           )}

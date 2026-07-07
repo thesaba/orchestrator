@@ -2,6 +2,7 @@ import { BlockStack, InlineStack, Text, Badge, Button, Banner, DataTable, Spinne
 import { useEffect, useState } from 'react'
 import { composerApi, ComposerPackage } from '../api/client'
 import { useToast } from '../context/toast'
+import { LogConsole } from './LogConsole'
 
 export function ComposerTab({ siteId }: { siteId: number }) {
   const [packages, setPackages]   = useState<ComposerPackage[]>([])
@@ -84,7 +85,7 @@ export function ComposerTab({ siteId }: { siteId: number }) {
       {output && (
         <BlockStack gap="200">
           <Text as="h3" variant="headingSm">Output</Text>
-          <pre className="oc-terminal" style={{ maxHeight: 300 }}>{output}</pre>
+          <LogConsole lines={[output]} minHeight={120} maxHeight={300} />
         </BlockStack>
       )}
     </BlockStack>
