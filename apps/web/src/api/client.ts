@@ -229,6 +229,15 @@ export const api = {
       request<AlertRule>(`/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     remove: (id: number) => request<{ ok: true }>(`/alerts/${id}`, { method: 'DELETE' })
   },
+  ai: {
+    config: () => request<AiConfig>('/ai/config'),
+    saveConfig: (data: { enabled?: boolean; provider?: string; model?: string; baseUrl?: string; apiKey?: string }) =>
+      request<{ ok: true }>('/ai/config', { method: 'PATCH', body: JSON.stringify(data) }),
+    explainError: (id: number, force = false) =>
+      request<{ explanation: string; cached: boolean }>(`/ai/explain-error/${id}${force ? '?force=1' : ''}`, { method: 'POST' }),
+    explainDeploy: (deploymentId: number) =>
+      request<{ explanation: string }>(`/ai/explain-deploy/${deploymentId}`, { method: 'POST' })
+  },
   siteSecurity: {
     get: (siteId: number) => request<SiteSecurity>(`/sites/${siteId}/security`),
     update: (siteId: number, data: { basicAuth?: boolean; basicUser?: string; basicPassword?: string; ipMode?: 'allow' | 'deny' | 'off'; ipList?: string[] }) =>
@@ -614,6 +623,14 @@ export interface StatusPageConfig {
   enabled: boolean
   token: string | null
   url: string | null
+}
+
+export interface AiConfig {
+  enabled: boolean
+  provider: 'openai' | 'anthropic'
+  model: string
+  baseUrl: string
+  configured: boolean
 }
 
 export interface SiteSecurity {

@@ -23,6 +23,8 @@ export function ErrorsPage() {
   const [status, setStatus]     = useState<'0' | '1' | '' | 'ig'>('0')
   const [detail, setDetail]     = useState<LogErrorDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [aiText, setAiText]     = useState<string | null>(null)
+  const [aiBusy, setAiBusy]     = useState(false)
   const navigate = useNavigate()
 
   const load = useCallback(() => {
@@ -42,9 +44,16 @@ export function ErrorsPage() {
   useEffect(() => { api.sites.list().then((s) => setSites(s.map((x) => ({ id: x.id, domain: x.domain })))).catch(() => {}) }, [])
 
   const openDetail = async (id: number) => {
-    setDetailLoading(true); setDetail(null)
+    setDetailLoading(true); setDetail(null); setAiText(null)
     try { setDetail(await api.logErrors.get(id)) } catch { /* ignore */ }
     finally { setDetailLoading(false) }
+  }
+
+  const explain = async (id: number, force = false) => {
+    setAiBusy(true)
+    try { const r = await api.ai.explainError(id, force); setAiText(r.explanation) }
+    catch (e: unknown) { setAiText(`⚠️ ${e instanceof Error ? e.message : 'AI request failed'}`) }
+    finally { setAiBusy(false) }
   }
 
   const setResolved = async (id: number, resolved: boolean) => {
@@ -180,6 +189,18 @@ export function ErrorsPage() {
               {detail.sample && (
                 <div className="oc-terminal" style={{ maxHeight: 260, fontSize: 12 }}>
                   {detail.sample}
+                </div>
+              )}
+
+              <InlineStack gap="200" blockAlign="center">
+                <Button icon={undefined} onClick={() => explain(detail.id)} loading={aiBusy} disabled={aiBusy}>
+                  ✨ Explain with AI
+                </Button>
+                {aiText && <Button variant="plain" onClick={() => explain(detail.id, true)} disabled={aiBusy}>Regenerate</Button>}
+              </InlineStack>
+              {aiText && (
+                <div style={{ whiteSpace: 'pre-wrap', background: 'var(--oc-bg-secondary, #f6f6f7)', border: '1px solid var(--oc-border, #e1e3e5)', borderRadius: 8, padding: 12, fontSize: 13 }}>
+                  {aiText}
                 </div>
               )}
             </BlockStack>

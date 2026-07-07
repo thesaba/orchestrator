@@ -19,6 +19,7 @@ import { useToast } from '../context/toast'
 import { useAuth } from '../context/AuthContext'
 import { TelegramCard } from '../components/TelegramCard'
 import { DigestCard } from '../components/DigestCard'
+import { AiCard } from '../components/AiCard'
 
 const EMPTY: PanelSettings = {
   panel_title: '',
@@ -386,6 +387,12 @@ export function SettingsPage() {
       <Layout.Section>
         <TelegramCard />
       </Layout.Section>
+
+      {isAdmin && (
+        <Layout.Section>
+          <AiCard />
+        </Layout.Section>
+      )}
 
       <Layout.Section>
         <Card>

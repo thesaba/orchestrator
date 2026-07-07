@@ -82,6 +82,8 @@ export function SiteDetailPage() {
   const [deployError, setDeployError]   = useState('')
   const [deployResult, setDeployResult] = useState<'success' | 'failed' | 'queued' | null>(null)
   const [reviewOpen, setReviewOpen]     = useState(false)
+  const [deployAi, setDeployAi]         = useState<string | null>(null)
+  const [deployAiBusy, setDeployAiBusy] = useState(false)
 
   // Releases / rollback
   const [releases, setReleases]           = useState<Release[]>([])
@@ -1164,11 +1166,33 @@ export function SiteDetailPage() {
       </BlockStack>
 
       {/* ── Deployment log modal ──────────────────────────────────────────── */}
-      <Modal open={!!logModal} onClose={() => setLogModal(null)}
+      <Modal open={!!logModal} onClose={() => { setLogModal(null); setDeployAi(null) }}
         title={logModal ? `Deploy log — ${logModal.branch}@${logModal.commit ?? '?'}` : ''} size="large">
         <Modal.Section>
           {logModal?.log ? (
-            <LogConsole lines={[logModal.log]} minHeight={200} maxHeight={520} />
+            <BlockStack gap="300">
+              <LogConsole lines={[logModal.log]} minHeight={200} maxHeight={520} />
+              {isAdmin && logModal.id && (
+                <>
+                  <InlineStack gap="200">
+                    <Button
+                      loading={deployAiBusy}
+                      onClick={async () => {
+                        setDeployAiBusy(true); setDeployAi(null)
+                        try { const r = await api.ai.explainDeploy(logModal.id); setDeployAi(r.explanation) }
+                        catch (e: unknown) { setDeployAi(`⚠️ ${e instanceof Error ? e.message : 'AI request failed'}`) }
+                        finally { setDeployAiBusy(false) }
+                      }}
+                    >✨ Diagnose with AI</Button>
+                  </InlineStack>
+                  {deployAi && (
+                    <div style={{ whiteSpace: 'pre-wrap', background: 'var(--oc-bg-secondary, #f6f6f7)', border: '1px solid var(--oc-border, #e1e3e5)', borderRadius: 8, padding: 12, fontSize: 13 }}>
+                      {deployAi}
+                    </div>
+                  )}
+                </>
+              )}
+            </BlockStack>
           ) : (
             <Text as="p" tone="subdued">No log available.</Text>
           )}

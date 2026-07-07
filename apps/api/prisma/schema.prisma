@@ -149,6 +149,7 @@ model LogError {
   lastSeenAt     DateTime @default(now())
   resolved       Boolean  @default(false)
   ignored        Boolean  @default(false) // muted — the collector stops re-surfacing this group
+  aiExplanation  String?  // cached AI explanation (computed once, on demand)
   createdAt      DateTime @default(now())
 
   @@unique([siteId, fingerprint])
