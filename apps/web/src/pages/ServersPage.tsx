@@ -2,8 +2,20 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Page, Card, BlockStack, InlineStack, Text, Badge, Button, TextField, Modal, Banner, Spinner
 } from '@shopify/polaris'
-import { api, ServerInfo, ServerProbe } from '../api/client'
+import { api, ServerInfo, ServerProbe, ServerStats } from '../api/client'
 import { useToast } from '../context/toast'
+
+function fmtBytes(n: number): string {
+  if (!n) return '0'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0; let v = n
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
+}
+function fmtUptime(sec: number): string {
+  const d = Math.floor(sec / 86400); const h = Math.floor((sec % 86400) / 3600); const m = Math.floor((sec % 3600) / 60)
+  return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`
+}
 
 function statusBadge(s: ServerInfo) {
   if (s.kind === 'local') return <Badge tone="info">local</Badge>
@@ -24,6 +36,8 @@ export function ServersPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ServerInfo | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [health, setHealth] = useState<{ server: ServerInfo; stats: ServerStats } | null>(null)
+  const [healthBusy, setHealthBusy] = useState<number | null>(null)
 
   // form
   const [name, setName] = useState('')
@@ -93,6 +107,16 @@ export function ServersPage() {
     } finally { setBusyId(null) }
   }
 
+  const showHealth = async (s: ServerInfo) => {
+    setHealthBusy(s.id)
+    try {
+      const r = await api.servers.health(s.id)
+      setHealth({ server: s, stats: r.stats })
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed to reach server', { error: true })
+    } finally { setHealthBusy(null) }
+  }
+
   const remove = async (s: ServerInfo) => {
     if (!confirm(`Delete server "${s.name}"? This is only allowed if it hosts no sites.`)) return
     setBusyId(s.id)
@@ -134,6 +158,7 @@ export function ServersPage() {
                     </Text>
                   </BlockStack>
                   <InlineStack gap="200">
+                    <Button onClick={() => showHealth(s)} loading={healthBusy === s.id} disabled={s.kind === 'remote' && !s.hasKey}>Health</Button>
                     {s.kind === 'remote' && (
                       <Button onClick={() => testSaved(s)} loading={busyId === s.id} disabled={!s.hasKey}>Test</Button>
                     )}
@@ -148,6 +173,37 @@ export function ServersPage() {
           </BlockStack>
         )}
       </BlockStack>
+
+      <Modal
+        open={!!health}
+        onClose={() => setHealth(null)}
+        title={health ? `${health.server.name} — ${health.stats.hostname}` : ''}
+        secondaryActions={[{ content: 'Close', onAction: () => setHealth(null) }]}
+      >
+        <Modal.Section>
+          {health && (
+            <BlockStack gap="300">
+              {[
+                { label: 'CPU', pct: health.stats.cpu.percent, extra: `load ${health.stats.cpu.load1} · ${health.stats.cpu.cores} cores` },
+                { label: 'RAM', pct: health.stats.ram.percent, extra: `${fmtBytes(health.stats.ram.used)} / ${fmtBytes(health.stats.ram.total)}` },
+                { label: 'Disk', pct: health.stats.disk.percent, extra: `${fmtBytes(health.stats.disk.used)} / ${fmtBytes(health.stats.disk.total)}` },
+                { label: 'Swap', pct: health.stats.swap.percent, extra: `${fmtBytes(health.stats.swap.used)} / ${fmtBytes(health.stats.swap.total)}` }
+              ].map((row) => (
+                <BlockStack gap="100" key={row.label}>
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd" fontWeight="medium">{row.label}</Text>
+                    <Text as="span" variant="bodySm" tone="subdued">{row.pct}% · {row.extra}</Text>
+                  </InlineStack>
+                  <div style={{ height: 8, borderRadius: 4, background: 'var(--oc-bg-secondary, #f1f2f3)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${Math.min(100, row.pct)}%`, background: row.pct >= 90 ? '#de3618' : row.pct >= 75 ? '#f49342' : '#458fff' }} />
+                  </div>
+                </BlockStack>
+              ))}
+              <Text as="p" variant="bodySm" tone="subdued">Uptime: {fmtUptime(health.stats.uptime)}</Text>
+            </BlockStack>
+          )}
+        </Modal.Section>
+      </Modal>
 
       <Modal
         open={modalOpen}

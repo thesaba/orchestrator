@@ -250,7 +250,8 @@ export const api = {
     remove: (id: number) => request<{ ok: true }>(`/servers/${id}`, { method: 'DELETE' }),
     test: (id: number) => request<ServerProbe>(`/servers/${id}/test`, { method: 'POST' }),
     testConnection: (data: { host: string; port?: number; sshUser?: string; sshKey: string }) =>
-      request<ServerProbe>('/servers/test-connection', { method: 'POST', body: JSON.stringify(data) })
+      request<ServerProbe>('/servers/test-connection', { method: 'POST', body: JSON.stringify(data) }),
+    health: (id: number) => request<{ ok: boolean; stats: ServerStats }>(`/servers/${id}/health`)
   },
   siteSecurity: {
     get: (siteId: number) => request<SiteSecurity>(`/sites/${siteId}/security`),
@@ -660,6 +661,15 @@ export interface ServerProbe {
   ok: boolean
   info?: string
   error?: string
+}
+
+export interface ServerStats {
+  cpu: { load1: number; load5: number; load15: number; cores: number; percent: number }
+  ram: { total: number; used: number; free: number; percent: number }
+  disk: { total: number; used: number; percent: number }
+  swap: { total: number; used: number; percent: number }
+  uptime: number
+  hostname: string
 }
 
 export interface AiConfig {

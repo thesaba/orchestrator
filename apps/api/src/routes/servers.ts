@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import crypto from 'crypto'
 import { writeSecret } from '../lib/crypto'
 import { execOn, ServerCtx } from '../lib/server-exec'
+import { statsFor } from '../lib/server-stats'
 
 // Never leak the private key. Public projection of a Server row.
 function publicServer(s: any, siteCount = 0) {
@@ -172,5 +173,25 @@ export const serversRoutes: FastifyPluginAsync = async (app) => {
     await prisma.server.update({ where: { id }, data: { status: r.ok ? 'online' : 'offline', lastSeenAt: r.ok ? new Date() : server.lastSeenAt } })
     app.audit('server.test', { req: request, meta: { serverId: id, ok: r.ok } })
     return r
+  })
+
+  // Live system stats for a server (CPU/RAM/disk/swap/uptime). Local → in-process
+  // os stats; remote → one SSH round-trip.
+  app.get('/:id/health', async (request, reply) => {
+    const id = Number((request.params as { id: string }).id)
+    const server = await prisma.server.findUnique({ where: { id } })
+    if (!server) return reply.code(404).send({ error: 'Server not found' })
+    const ctx: ServerCtx = server.kind === 'local' || !server.host
+      ? null
+      : { kind: 'remote', host: server.host, port: server.port, sshUser: server.sshUser, sshKey: server.sshKey }
+    try {
+      const stats = await statsFor(ctx)
+      await prisma.server.update({ where: { id }, data: { status: 'online', lastSeenAt: new Date() } }).catch(() => {})
+      return { ok: true, stats }
+    } catch (e: unknown) {
+      await prisma.server.update({ where: { id }, data: { status: 'offline' } }).catch(() => {})
+      const err = e as { stderr?: string; message?: string }
+      return reply.code(502).send({ error: (err.stderr || err.message || 'Failed to reach server').toString().slice(0, 300) })
+    }
   })
 }

@@ -185,15 +185,18 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
     schema: {
       querystring: {
         type: 'object',
-        properties: { hours: { type: 'integer', minimum: 1, maximum: 168 } },
+        properties: {
+          hours: { type: 'integer', minimum: 1, maximum: 168 },
+          serverId: { type: 'integer' } // omit → local host history (serverId null)
+        },
         additionalProperties: false
       }
     }
   }, async (request) => {
-    const { hours = 24 } = request.query as { hours?: number }
+    const { hours = 24, serverId } = request.query as { hours?: number; serverId?: number }
     const since = new Date(Date.now() - hours * 3_600_000)
     const samples = await app.prisma.metricSample.findMany({
-      where: { checkedAt: { gte: since } },
+      where: { checkedAt: { gte: since }, serverId: serverId ?? null } as any,
       orderBy: { checkedAt: 'asc' },
       select: { cpuPercent: true, ramPercent: true, diskPercent: true, checkedAt: true }
     })
