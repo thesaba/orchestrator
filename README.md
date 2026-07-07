@@ -119,6 +119,9 @@ Under the hood it is a small **pnpm monorepo**: a **Fastify + Prisma** API that 
 - 🔑 **Personal Access Tokens** — scriptable panel API for CI/curl (hashed, scoped to your role, revocable)
 - 🛡️ **Per-site security** — HTTP basic auth + IP allow/deny, applied to nginx with backup + validate + auto-rollback
 
+### 🖥️ Infrastructure
+- 🌐 **Multi-server (SSH)** — register additional servers and place new sites on them; the panel host is the always-present “local” server. Reached agentlessly over SSH with a key you provide (stored encrypted, trust-on-first-use host keys). Existing sites stay local and are completely unaffected — `serverId=null` resolves to local, so nothing about their execution changes. *(Foundation shipped: registry, connection testing, target-server picker. Remote monitoring and remote provision/deploy wiring land in follow-up commits.)*
+
 ### 🧠 Productivity
 - ✨ **AI assistant** — explains errors, diagnoses failed deploys, and answers free-form ops questions in a chat page (optionally grounded in a site's live status + recent errors). Bring-your-own-key, secrets redacted, read-only/advisory; supports OpenAI-compatible & Anthropic (incl. local models like Ollama), with a configurable daily request limit, usage counter and one-click connection test
 - 📱 **Interactive Telegram bot** — manage sites, deploys, rollbacks & tasks from chat, with your own role/site permissions
