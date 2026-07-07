@@ -49,9 +49,10 @@ export async function ensureScriptsSynced(prisma: PrismaClient, serverId: number
   const server = await (prisma as any).server.findUnique({ where: { id: serverId } }).catch(() => null)
   const ctx = toServerCtx(server)
   if (isLocal(ctx)) return { local: true, scriptsDir: localScriptsDir() }
-  if (!server.scriptsSynced) {
-    await syncScripts(ctx as RemoteServer)
-    await (prisma as any).server.update({ where: { id: server.id }, data: { scriptsSynced: true } }).catch(() => {})
-  }
+  // Always (re)sync: the tarball is a few KB, and this guarantees the remote
+  // always has the latest scripts (a stale scriptsSynced flag previously left
+  // newly-added scripts like bootstrap-server.sh missing on the remote).
+  await syncScripts(ctx as RemoteServer)
+  await (prisma as any).server.update({ where: { id: server.id }, data: { scriptsSynced: true } }).catch(() => {})
   return { local: false, scriptsDir: REMOTE_SCRIPTS_DIR }
 }
