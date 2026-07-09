@@ -240,6 +240,7 @@ function OverviewTab({ overview }: { overview: BillingOverview | null }) {
               ['60+ days overdue', formatMinor(overview.aging.d61_plus, c)]
             ]}
             totals={['', formatMinor(overview.aging.total, c)]}
+            showTotalsInFooter
           />
         </BlockStack>
       </Card>

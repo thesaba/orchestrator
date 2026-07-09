@@ -252,18 +252,42 @@ export interface NextStepPreview {
   level: EnforcementLevel | null
 }
 
+export interface NextStepOptions {
+  timeZone?: string
+  /**
+   * The most severe level this subscription can ever reach (see `capLevel`).
+   * Steps that would exceed it are skipped: telling the operator that a
+   * never-auto-suspended site will `stop_workers` in 18 days is a lie, because
+   * that rung requires a suspension that will never happen.
+   */
+  maxLevel?: EnforcementLevel
+}
+
 /**
- * The next step that has *not* fired yet — powers the "what happens next"
- * preview so the operator is never surprised by an automatic suspension.
+ * The next step that has *not* fired yet and that can *actually* fire —
+ * powers the "what happens next" preview so the operator is never surprised,
+ * and never warned about something impossible.
  */
 export function nextStep(
   dueDate: Date,
   now: Date,
   policy: DunningStep[],
-  timeZone: string = BILLING_TZ
+  opts: NextStepOptions = {}
 ): NextStepPreview | null {
-  const overdue = daysOverdue(dueDate, now, timeZone)
-  const upcoming = policy.filter((s) => s.offsetDays > overdue).sort((a, b) => a.offsetDays - b.offsetDays)[0]
+  const tz = opts.timeZone ?? BILLING_TZ
+  const max = opts.maxLevel ?? 'archived'
+  const overdue = daysOverdue(dueDate, now, tz)
+
+  const upcoming = policy
+    .filter((s) => s.offsetDays > overdue)
+    .filter((s) => {
+      // Notification rungs always happen; enforcement rungs only if the cap allows.
+      if (isNotifyOnly(s.action)) return true
+      const lvl = actionLevel(s.action)
+      return !lvl || !isMoreSevere(lvl, max)
+    })
+    .sort((a, b) => a.offsetDays - b.offsetDays)[0]
+
   if (!upcoming) return null
   const date = new Date(dueDate.getTime() + upcoming.offsetDays * 86_400_000)
   return {

@@ -111,6 +111,30 @@ test('nextStep returns null once the ladder is exhausted', () => {
   assert.equal(nextStep(DUE, at(500), DEFAULT_DUNNING_POLICY), null)
 })
 
+test('a capped subscription is never promised a rung it can never reach', () => {
+  // 12 days overdue, capped at banner. The raw next step is +30 stop_workers,
+  // but that requires a suspension which will never happen — the honest answer
+  // is the next NOTIFICATION rung, +60 final_warning.
+  const raw = nextStep(DUE, at(12), DEFAULT_DUNNING_POLICY)
+  assert.equal(raw!.step.action, 'stop_workers')
+
+  const capped = nextStep(DUE, at(12), DEFAULT_DUNNING_POLICY, { maxLevel: 'banner' })
+  assert.equal(capped!.step.action, 'final_warning')
+  assert.equal(capped!.daysAway, 48)
+})
+
+test('a capped subscription skips restrict/suspend but keeps notifications', () => {
+  const n = nextStep(DUE, at(1), DEFAULT_DUNNING_POLICY, { maxLevel: 'banner' })
+  assert.equal(n!.step.action, 'banner') // +4 banner is still reachable
+  const after = nextStep(DUE, at(5), DEFAULT_DUNNING_POLICY, { maxLevel: 'banner' })
+  assert.equal(after!.step.action, 'final_warning') // +7 restrict and +10 suspend skipped
+})
+
+test('an uncapped subscription still sees every rung', () => {
+  const n = nextStep(DUE, at(12), DEFAULT_DUNNING_POLICY, { maxLevel: 'archived' })
+  assert.equal(n!.step.action, 'stop_workers')
+})
+
 // ── level ordering ──────────────────────────────────────────────────────────
 
 test('level severity ordering', () => {

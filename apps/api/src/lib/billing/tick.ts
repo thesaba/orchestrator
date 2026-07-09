@@ -304,12 +304,17 @@ export async function previewSubscription(app: FastifyInstance, subscriptionId: 
     }
   }
 
+  const suspendAllowed = (sub.plan?.autoSuspend ?? true) && !sub.neverAutoSuspend
   const ladder = resolveLadder(unpaid.dueDate, now, policy, {
     gracePeriodDays: sub.gracePeriodDays ?? sub.plan?.gracePeriodDays ?? 0,
     autoSuspend: sub.plan?.autoSuspend ?? true,
     neverAutoSuspend: sub.neverAutoSuspend
   })
-  const next = nextStep(unpaid.dueDate, now, policy)
+  // The preview must respect the same cap the enforcer does, or it promises
+  // rungs (stop_workers, archive) that a capped subscription can never reach.
+  const next = nextStep(unpaid.dueDate, now, policy, {
+    maxLevel: suspendAllowed ? 'archived' : 'banner'
+  })
 
   return {
     domain: sub.site?.domain,

@@ -507,9 +507,41 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
     const invoice = await db.invoice.findUnique({ where: { id } })
     if (!invoice) return reply.code(404).send({ error: 'Invoice not found' })
     if (invoice.status === 'paid') return reply.code(400).send({ error: 'A paid invoice cannot be voided.' })
+    if (invoice.status === 'void') return { voided: true }
+
     await db.invoice.update({ where: { id }, data: { status: 'void' } })
-    app.audit('billing.invoice_voided', { req: request, meta: { invoiceId: id, number: invoice.number } })
-    return { voided: true }
+
+    // Issuing an invoice advances the subscription's anchor to the next period.
+    // Voiding it must GIVE THAT PERIOD BACK, otherwise the period is silently
+    // skipped forever: the next tick would jump straight to the following one
+    // and the client would never be billed for it.
+    let periodRestored = false
+    if (invoice.subscriptionId) {
+      const sub = await db.subscription.findUnique({ where: { id: invoice.subscriptionId } })
+      if (sub && new Date(sub.nextInvoiceAt) > new Date(invoice.periodStart)) {
+        await db.subscription.update({
+          where: { id: sub.id },
+          data: { nextInvoiceAt: invoice.periodStart }
+        })
+        periodRestored = true
+      }
+      await db.billingEvent.create({
+        data: {
+          subscriptionId: invoice.subscriptionId,
+          invoiceId: id,
+          type: 'invoice_voided',
+          detail: periodRestored
+            ? `${invoice.number} voided; billing anchor rolled back to ${new Date(invoice.periodStart).toISOString().slice(0, 10)}`
+            : `${invoice.number} voided`
+        }
+      }).catch(() => {})
+    }
+
+    app.audit('billing.invoice_voided', {
+      req: request,
+      meta: { invoiceId: id, number: invoice.number, periodRestored }
+    })
+    return { voided: true, periodRestored }
   })
 
   // ── Profitability: revenue vs what the site actually consumes ──────────────
