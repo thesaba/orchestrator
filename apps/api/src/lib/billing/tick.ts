@@ -83,14 +83,23 @@ export async function runBillingTick(
     errors: []
   }
 
+  // A dry run must be perfectly side-effect free: it may not create invoices,
+  // send messages, or write status rows. It only *reports* what a real run
+  // would do.
+  const commit = mode !== 'dry_run'
+
   // ── 1. Issue invoices whose anchor date has arrived ───────────────────────
   // Bookkeeping runs even when enforcement is off — you always want the ledger.
   const dueSubs = await prisma.subscription.findMany({
     where: { status: { in: ['active', 'past_due', 'suspended'] }, nextInvoiceAt: { lte: now } },
-    select: { id: true }
+    select: { id: true, site: { select: { domain: true } } }
   })
   for (const s of dueSubs) {
     try {
+      if (!commit) {
+        report.issued.push(`would issue for ${s.site?.domain ?? `sub #${s.id}`}`)
+        continue
+      }
       const inv = await issueInvoiceForSubscription(prisma, s.id, now)
       if (inv) report.issued.push(inv.number)
     } catch (e) {
@@ -117,6 +126,12 @@ export async function runBillingTick(
       // 2a. Nothing owed → make sure the site is free of any enforcement.
       if (!unpaid) {
         if (sub.enforcementLevel !== 'none') {
+          // restoreSite/force deliberately bypasses the master switch (relaxing
+          // is always safe), so a dry run must be short-circuited here instead.
+          if (!commit) {
+            report.restored.push(`${sub.site.domain}: would restore (${sub.enforcementLevel} → none)`)
+            continue
+          }
           const r = await applyEnforcement(
             app,
             {
@@ -138,7 +153,7 @@ export async function runBillingTick(
             await setWorkersRunning(app, sub.siteId, true)
             report.restored.push(sub.site.domain)
           }
-        } else if (sub.status !== 'active') {
+        } else if (commit && sub.status !== 'active') {
           await prisma.subscription.update({ where: { id: sub.id }, data: { status: 'active' } })
         }
         continue
@@ -149,7 +164,7 @@ export async function runBillingTick(
       const amountStr = formatMoney(due, unpaid.currency)
 
       // Flip open → overdue once the due date passes (display only).
-      if (overdue > 0 && unpaid.status === 'open') {
+      if (commit && overdue > 0 && unpaid.status === 'open') {
         await prisma.invoice.update({ where: { id: unpaid.id }, data: { status: 'overdue' } })
       }
 
@@ -163,13 +178,20 @@ export async function runBillingTick(
       // 2b. Notifications — send each rung at most once per invoice, ever.
       for (const action of ladder.notifyActions) {
         const eventType = `notify:${action}`
+        // Only a REAL send counts as "already notified". A dry run must never
+        // poison this check, or the subsequent live run would silently skip
+        // the reminder it was previewing.
         const already = await prisma.billingEvent.findFirst({
-          where: { subscriptionId: sub.id, invoiceId: unpaid.id, type: eventType }
+          where: { subscriptionId: sub.id, invoiceId: unpaid.id, type: eventType, dryRun: false }
         })
         if (already) continue
 
         const copy = notifyCopy(action, sub.client?.locale ?? 'ka', sub.site.domain, amountStr, overdue)
-        if (mode !== 'dry_run') {
+        if (!commit) {
+          report.notified.push(`${sub.site.domain}: would send ${action}`)
+          continue
+        }
+        {
           await createNotification(app, {
             type: 'billing',
             level: action === 'final_warning' ? 'critical' : 'warning',
@@ -194,7 +216,7 @@ export async function runBillingTick(
             invoiceId: unpaid.id,
             type: eventType,
             detail: copy.title,
-            dryRun: mode === 'dry_run'
+            dryRun: false
           }
         }).catch(() => {})
         report.notified.push(`${sub.site.domain}: ${action}`)
@@ -241,7 +263,7 @@ export async function runBillingTick(
       }
 
       // Keep `past_due` accurate even when no level changed.
-      if (overdue > 0 && sub.status === 'active') {
+      if (commit && overdue > 0 && sub.status === 'active') {
         await prisma.subscription.update({ where: { id: sub.id }, data: { status: 'past_due' } })
       }
     } catch (e) {
