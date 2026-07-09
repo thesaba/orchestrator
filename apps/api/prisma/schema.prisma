@@ -159,6 +159,8 @@ model Site {
   calendarEvents  CalendarEvent[]
   envVersions     EnvVersion[]
   logErrors       LogError[]
+  subscription    Subscription?
+  invoices        Invoice[]
 }
 
 // A grouped application error mined from a site's Laravel log (mini-Sentry).
@@ -461,4 +463,199 @@ model CalendarEventAttendee {
 
   @@unique([eventId, userId])
   @@index([userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BILLING
+//
+//  Money is ALWAYS stored as an integer in the currency's minor unit
+//  (tetri for GEL, cents for USD/EUR). Never floats — no rounding drift.
+//
+//  Everything here is additive and inert until `billing_enforcement` is
+//  switched on in Settings (default "off"), so existing hosted sites are
+//  completely unaffected by simply having these tables present.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A person/company that pays for one or more sites. Deliberately separate
+/// from `User` — a client never needs panel access.
+model Client {
+  id             Int      @id @default(autoincrement())
+  name           String
+  email          String?
+  phone          String?
+  telegramChatId String?
+  company        String?
+  taxId          String?
+  currency       String   @default("GEL")
+  locale         String   @default("ka") // "ka" | "en" — dunning message language
+  /// Token for the read-only client portal (same pattern as status pages).
+  portalToken    String?  @unique
+  notes          String?
+  archived       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  subscriptions  Subscription[]
+  invoices       Invoice[]
+
+  @@index([archived])
+}
+
+/// A reusable price + dunning policy. A Subscription may override both.
+model Plan {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  /// Minor units (e.g. 3000 = 30.00 GEL)
+  amount          Int
+  currency        String   @default("GEL")
+  interval        String   @default("monthly") // "monthly" | "yearly" | "custom_days"
+  intervalDays    Int?     // used when interval = "custom_days"
+  /// JSON array of dunning steps; empty string = use the built-in default ladder.
+  dunningPolicy   String   @default("")
+  gracePeriodDays Int      @default(3)
+  autoSuspend     Boolean  @default(true)
+  archived        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subscriptions   Subscription[]
+}
+
+/// Binds a site to a client at a price, on that client's own billing anchor.
+model Subscription {
+  id              Int      @id @default(autoincrement())
+  /// One active subscription per site.
+  siteId          Int      @unique
+  site            Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  clientId        Int
+  /// Restrict: never silently orphan invoices by deleting a client.
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  planId          Int?
+  plan            Plan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  /// Snapshot of the price actually charged (may differ from the plan).
+  amount          Int
+  currency        String   @default("GEL")
+  interval        String   @default("monthly")
+  intervalDays    Int?
+  /// Day of month (1–28) this client is billed on. Each client can differ.
+  anchorDay       Int?
+
+  startDate       DateTime @default(now())
+  /// When the next invoice should be generated (drives the daily tick).
+  nextInvoiceAt   DateTime
+  status          String   @default("active") // active | past_due | suspended | cancelled | paused
+
+  /// Current serving-layer enforcement applied to the site.
+  enforcementLevel String  @default("none") // none | banner | restrict | suspend | archived
+  lastEnforcedAt   DateTime?
+
+  /// Safety valves.
+  neverAutoSuspend Boolean @default(false)
+  gracePeriodDays  Int     @default(3)
+  /// JSON override of the plan/default ladder; empty = inherit.
+  dunningPolicy    String  @default("")
+
+  suspendedAt     DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invoices        Invoice[]
+  events          BillingEvent[]
+
+  @@index([status])
+  @@index([nextInvoiceAt])
+  @@index([clientId])
+}
+
+/// Immutable once issued: amounts are a snapshot, the number never changes.
+model Invoice {
+  id             Int      @id @default(autoincrement())
+  /// Sequential, human-facing, e.g. "INV-2026-0042".
+  number         String   @unique
+  clientId       Int
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId Int?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  siteId         Int?
+  site           Site?    @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  periodStart    DateTime
+  periodEnd      DateTime
+  issuedAt       DateTime?
+  dueDate        DateTime
+
+  /// Minor units. `amountPaid` supports partial payments.
+  amount         Int
+  amountPaid     Int      @default(0)
+  currency       String   @default("GEL")
+  status         String   @default("draft") // draft | open | partial | paid | overdue | void
+
+  paidAt         DateTime?
+  /// JSON snapshot of line items at issue time.
+  lineItems      String   @default("[]")
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  payments       Payment[]
+  events         BillingEvent[]
+
+  @@index([status, dueDate])
+  @@index([clientId])
+  @@index([siteId])
+}
+
+/// One received payment. Supports cash today; `reference`/`source`/`externalId`
+/// are the hooks a future bank-statement import or payment gateway will use
+/// (externalId is unique → idempotent imports, no double-crediting).
+model Payment {
+  id           Int      @id @default(autoincrement())
+  invoiceId    Int
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount       Int      // minor units
+  currency     String   @default("GEL")
+  method       String   @default("cash")   // cash | bank_transfer | card | other
+  source       String   @default("manual") // manual | telegram | bank_import | gateway
+  /// Bank reference / statement line id — used to match imported statements.
+  reference    String?
+  /// Idempotency key for imports & gateways.
+  externalId   String?  @unique
+  receivedAt   DateTime @default(now())
+  /// Panel user who recorded it (plain id: no relation, keeps User untouched).
+  recordedById Int?
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([receivedAt])
+}
+
+/// Append-only audit of every dunning / enforcement transition.
+model BillingEvent {
+  id             Int      @id @default(autoincrement())
+  subscriptionId Int
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  invoiceId      Int?
+  invoice        Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  /// reminder_sent | grace_started | banner | restrict | suspend | restored |
+  /// archived | invoice_issued | payment_recorded | dry_run
+  type           String
+  /// Enforcement level before → after (for the ladder transitions).
+  fromLevel      String?
+  toLevel        String?
+  detail         String?
+  /// true when the master switch was in dry_run: nothing was actually applied.
+  dryRun         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([subscriptionId, createdAt])
+  @@index([type])
+}
+
+/// Per-year sequence source for invoice numbers (transactional increment).
+model BillingCounter {
+  year Int @id
+  seq  Int @default(0)
 }

@@ -27,6 +27,8 @@ const ErrorsPage     = lazy(() => named(import('./pages/ErrorsPage'), 'ErrorsPag
 const AssistantPage  = lazy(() => named(import('./pages/AssistantPage'), 'AssistantPage'))
 const ServersPage    = lazy(() => named(import('./pages/ServersPage'), 'ServersPage'))
 const StatusPage     = lazy(() => named(import('./pages/StatusPage'), 'StatusPage'))
+const BillingPage    = lazy(() => named(import('./pages/BillingPage'), 'BillingPage'))
+const ClientPortalPage = lazy(() => named(import('./pages/ClientPortalPage'), 'ClientPortalPage'))
 
 function RouteFallback() {
   return (
@@ -57,6 +59,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/status/:token" element={<Suspense fallback={<RouteFallback />}><StatusPage /></Suspense>} />
+      {/* Public, token-authenticated client billing portal — no panel login. */}
+      <Route path="/client/:token" element={<Suspense fallback={<RouteFallback />}><ClientPortalPage /></Suspense>} />
       <Route
         path="/*"
         element={
@@ -75,6 +79,7 @@ function AppRoutes() {
                   <Route path="/servers"    element={<AdminRoute><ServersPage /></AdminRoute>} />
                   <Route path="/system"     element={<AdminRoute><SystemPage /></AdminRoute>} />
                   <Route path="/errors"     element={<AdminRoute><ErrorsPage /></AdminRoute>} />
+                  <Route path="/billing"    element={<AdminRoute><BillingPage /></AdminRoute>} />
                   <Route path="/assistant"  element={<AdminRoute><AssistantPage /></AdminRoute>} />
                   <Route path="/tasks"      element={<TasksPage />} />
                   <Route path="/notes"      element={<NotesPage />} />

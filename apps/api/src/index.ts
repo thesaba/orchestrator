@@ -58,6 +58,9 @@ import { startAlertsMonitor } from './lib/alerts-monitor'
 import { startLogCollector } from './lib/log-collector'
 import { startSslMonitor } from './lib/ssl-monitor'
 import { startMetricsMonitor } from './lib/metrics-monitor'
+import { startBillingMonitor } from './lib/billing-monitor'
+import { billingRoutes } from './routes/billing'
+import { portalRoutes } from './routes/portal'
 import { seedLocalServer } from './lib/servers'
 
 const app = Fastify({
@@ -109,6 +112,9 @@ async function start() {
   await app.register(maintenanceRoutes, { prefix: '/api/sites' })
   await app.register(schedulerRoutes,   { prefix: '/api/sites' })
   await app.register(uptimeRoutes,      { prefix: '/api' })
+  await app.register(billingRoutes,     { prefix: '/api/billing' })
+  // Public, token-authenticated, read-only client portal (no panel login).
+  await app.register(portalRoutes,      { prefix: '/api/portal' })
 
   // Web terminal grants a real, unsandboxed shell on the host to any
   // authenticated panel user. Secured by JWT auth.
@@ -169,6 +175,8 @@ async function start() {
   startSslMonitor(app)
   startMetricsMonitor(app.prisma)
   startAlertsMonitor(app)
+  // Inert until `billing_enforcement` is switched on in Settings (default off).
+  startBillingMonitor(app)
   startLogCollector(app)
   startDigestMonitor(app)
 

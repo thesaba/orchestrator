@@ -113,7 +113,7 @@ async function handleMessage(app: FastifyInstance, token: string, msg: any): Pro
   if (cmd === '/tasks')  return void tgSend(token, chatId, ...(await tasksView(app, user)))
   if (cmd === '/help' || cmd === '/menu') {
     return void tgSend(token, chatId,
-      '<b>Orchestrator bot</b>\nManage your sites & tasks from here.\n\n/sites — your sites\n/tasks — your tasks\n/task &lt;title&gt; — quick task\n/status — server status (admin)\n\nTip: use the buttons below or under each message.',
+      '<b>Orchestrator bot</b>\nManage your sites & tasks from here.\n\n/sites — your sites\n/tasks — your tasks\n/task &lt;title&gt; — quick task\n/status — server status (admin)\n\n<b>Billing (admin)</b>\n/invoices — everything still owed\n/overdue — only past-due invoices\n/paid &lt;id|number&gt; — mark an invoice fully paid\n\nTip: use the buttons below or under each message.',
       REPLY_KB).then(() => tgSend(token, chatId, 'Main menu:', mainMenu(user)))
   }
   if (text.startsWith('/task ')) {
@@ -122,6 +122,18 @@ async function handleMessage(app: FastifyInstance, token: string, msg: any): Pro
     const { status } = await callApi(app, user, 'POST', '/api/tasks', { title })
     return void tgSend(token, chatId, status < 300 ? `✅ Task added: ${escapeHtml(title)}` : '⚠️ Could not add task')
   }
+
+  // ── Billing (admin-only; callApi injects the user's own role, so a
+  //    non-admin simply gets a 403 back and is told so) ─────────────────────
+  if (cmd === '/invoices' || cmd === '/overdue') {
+    return void tgSend(token, chatId, await billingListView(app, user, cmd === '/overdue'))
+  }
+  if (text.startsWith('/paid')) {
+    const arg = text.slice(5).trim()
+    if (!arg) return void tgSend(token, chatId, 'Usage: /paid &lt;invoice id or number&gt;\nExample: /paid 42 — or — /paid INV-2026-0042')
+    return void tgSend(token, chatId, await markPaidView(app, user, arg))
+  }
+
   return void tgSend(token, chatId, 'Unknown command. Use the buttons below or /help.', mainMenu(user))
 }
 
@@ -372,4 +384,63 @@ async function tryLink(app: FastifyInstance, code: string, from: any, chatId: nu
   const u = await app.prisma.user.findUnique({ where: { id: link.userId }, select: { email: true } })
   app.audit('telegram.linked', { meta: { userId: link.userId, telegramUserId: String(from.id) } })
   return `✅ Linked as <b>${escapeHtml(u?.email ?? '')}</b>. Send /help to get started.`
+}
+
+// ── Billing views ───────────────────────────────────────────────────────────
+// These call the admin-only /api/billing endpoints through `callApi`, which
+// signs a short-lived JWT carrying the *Telegram user's own role*. A developer
+// or viewer therefore gets a clean 403 instead of any billing data — the bot
+// never widens permissions.
+
+function money(minor: number, currency = 'GEL'): string {
+  const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₾'
+  const s = (Math.abs(minor) / 100).toFixed(2)
+  return currency === 'GEL' ? `${s} ${sym}` : `${sym}${s}`
+}
+
+async function billingListView(app: FastifyInstance, user: BotUser, overdueOnly: boolean): Promise<string> {
+  const path = overdueOnly ? '/api/billing/invoices/overdue' : '/api/billing/invoices?status=open'
+  const { status, body } = await callApi(app, user, 'GET', path)
+  if (status === 403) return '🚫 Billing is admin-only.'
+  if (status >= 300 || !Array.isArray(body)) return '⚠️ Could not load invoices.'
+  if (body.length === 0) return overdueOnly ? '✅ Nothing overdue.' : '✅ Nothing outstanding.'
+
+  const rows = body.slice(0, 20).map((i: any) => {
+    const bal = i.balance ?? i.amount
+    const who = i.client?.name ?? i.client ?? '—'
+    const dom = i.site?.domain ?? i.domain ?? '—'
+    const due = new Date(i.dueDate).toISOString().slice(0, 10)
+    return `<code>${escapeHtml(i.number)}</code> · ${escapeHtml(dom)}\n   ${escapeHtml(who)} — <b>${money(bal, i.currency)}</b> · due ${due}`
+  })
+  const total = body.reduce((s: number, i: any) => s + (i.balance ?? i.amount), 0)
+  const head = overdueOnly ? `⚠️ <b>Overdue (${body.length})</b>` : `🧾 <b>Outstanding (${body.length})</b>`
+  return `${head}\n\n${rows.join('\n')}\n\n<b>Total: ${money(total, body[0]?.currency)}</b>\n\nMark one paid: <code>/paid ${escapeHtml(body[0].number)}</code>`
+}
+
+async function markPaidView(app: FastifyInstance, user: BotUser, arg: string): Promise<string> {
+  // Accept either the numeric id or the human invoice number.
+  let id: number | null = /^\d+$/.test(arg) ? Number(arg) : null
+  if (id === null) {
+    const { status, body } = await callApi(app, user, 'GET', '/api/billing/invoices')
+    if (status === 403) return '🚫 Billing is admin-only.'
+    if (status >= 300 || !Array.isArray(body)) return '⚠️ Could not look up that invoice.'
+    const match = body.find((i: any) => i.number?.toLowerCase() === arg.toLowerCase())
+    if (!match) return `⚠️ No invoice named <code>${escapeHtml(arg)}</code>.`
+    id = match.id
+  }
+
+  const { status, body } = await callApi(app, user, 'POST', `/api/billing/invoices/${id}/pay`, {
+    method: 'cash',
+    source: 'telegram',
+    note: `Marked paid via Telegram by ${user.email}`
+  })
+  if (status === 403) return '🚫 Billing is admin-only.'
+  if (status === 404) return '⚠️ Invoice not found.'
+  if (status >= 300) return `⚠️ ${escapeHtml(body?.error ?? 'Could not record the payment.')}`
+
+  const paid = body?.fullyPaid
+    ? `✅ Invoice fully paid.`
+    : `✅ Payment recorded. Remaining: <b>${money(body?.balance ?? 0)}</b>`
+  const restored = body?.restored ? '\n🔓 Site restored — enforcement lifted.' : ''
+  return `${paid}${restored}`
 }

@@ -1469,3 +1469,123 @@ export const calendarApi = {
   remove: (id: number) => request<{ ok: boolean }>(`/calendar/events/${id}`, { method: 'DELETE' })
 }
 
+
+// ── Billing ─────────────────────────────────────────────────────────────────
+// Money is always an integer in the currency's minor unit (tetri/cents).
+
+export type EnforcementMode = 'off' | 'dry_run' | 'on'
+export type EnforcementLevel = 'none' | 'banner' | 'restrict' | 'suspend' | 'archived'
+
+export interface BillingClient {
+  id: number; name: string; email: string | null; phone: string | null
+  company: string | null; currency: string; locale: string
+  portalToken: string | null; archived: boolean
+  outstanding: number; sites: string[]
+}
+
+export interface BillingSubscription {
+  id: number; siteId: number; clientId: number; planId: number | null
+  amount: number; currency: string; interval: string; intervalDays: number | null
+  anchorDay: number | null; nextInvoiceAt: string; status: string
+  enforcementLevel: EnforcementLevel; neverAutoSuspend: boolean; gracePeriodDays: number
+  site: { id: number; domain: string; name: string } | null
+  client: { id: number; name: string } | null
+  plan: { id: number; name: string } | null
+}
+
+export interface BillingInvoice {
+  id: number; number: string; clientId: number; siteId: number | null
+  periodStart: string; periodEnd: string; dueDate: string; issuedAt: string | null
+  amount: number; amountPaid: number; balance: number; currency: string
+  status: 'draft' | 'open' | 'partial' | 'paid' | 'overdue' | 'void'
+  paidAt: string | null; amountFormatted: string
+  client?: { id: number; name: string } | null
+  site?: { id: number; domain: string } | null
+  payments?: { id: number; amount: number; method: string; receivedAt: string }[]
+}
+
+export interface BillingOverview {
+  mode: EnforcementMode; currency: string; clients: number; subscriptions: number
+  mrr: number; outstanding: number; suspended: number; pastDue: number
+  aging: { current: number; d1_30: number; d31_60: number; d61_plus: number; total: number }
+}
+
+export interface DunningStep { offsetDays: number; action: string }
+
+export interface SubscriptionPreview {
+  domain?: string; invoice?: string; balance: number; currency?: string
+  daysOverdue: number | null; currentLevel: EnforcementLevel; targetLevel: EnforcementLevel
+  withinGrace?: boolean; cappedByPolicy?: boolean
+  next: { action: string; level: EnforcementLevel | null; date: string; daysAway: number } | null
+  policy: DunningStep[]
+}
+
+export interface TickReport {
+  mode: EnforcementMode
+  issued: string[]; notified: string[]; escalated: string[]
+  restored: string[]; skipped: string[]; errors: string[]
+}
+
+export const billingApi = {
+  overview: () => request<BillingOverview>('/billing/overview'),
+
+  getEnforcement: () => request<{ mode: EnforcementMode }>('/billing/enforcement'),
+  setEnforcement: (mode: EnforcementMode) =>
+    request<{ mode: EnforcementMode }>('/billing/enforcement', { method: 'PUT', body: JSON.stringify({ mode }) }),
+  runTick: (dryRun: boolean) =>
+    request<TickReport>('/billing/run-tick', { method: 'POST', body: JSON.stringify({ dryRun }) }),
+
+  clients: () => request<BillingClient[]>('/billing/clients'),
+  createClient: (data: Partial<BillingClient>) =>
+    request<BillingClient>('/billing/clients', { method: 'POST', body: JSON.stringify(data) }),
+  updateClient: (id: number, data: Partial<BillingClient>) =>
+    request<BillingClient>(`/billing/clients/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  removeClient: (id: number) => request<{ deleted: true }>(`/billing/clients/${id}`, { method: 'DELETE' }),
+  rotatePortalToken: (id: number) =>
+    request<{ portalToken: string }>(`/billing/clients/${id}/rotate-token`, { method: 'POST', body: '{}' }),
+
+  subscriptions: () => request<BillingSubscription[]>('/billing/subscriptions'),
+  createSubscription: (data: {
+    siteId: number; clientId: number; amount: number | string; currency?: string
+    interval?: string; anchorDay?: number | null; gracePeriodDays?: number; neverAutoSuspend?: boolean
+  }) => request<BillingSubscription>('/billing/subscriptions', { method: 'POST', body: JSON.stringify(data) }),
+  updateSubscription: (id: number, data: Record<string, unknown>) =>
+    request<BillingSubscription>(`/billing/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  cancelSubscription: (id: number) =>
+    request<{ cancelled: true }>(`/billing/subscriptions/${id}`, { method: 'DELETE' }),
+  preview: (id: number) => request<SubscriptionPreview>(`/billing/subscriptions/${id}/preview`),
+  issueInvoice: (id: number) =>
+    request<{ id: number; number: string }>(`/billing/subscriptions/${id}/issue-invoice`, { method: 'POST', body: '{}' }),
+  enforce: (id: number, level: EnforcementLevel) =>
+    request<{ applied: boolean; dryRun: boolean; from: string; to: string; reason?: string }>(
+      `/billing/subscriptions/${id}/enforce`, { method: 'POST', body: JSON.stringify({ level }) }),
+
+  invoices: (params?: { status?: string; clientId?: number; siteId?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.clientId) q.set('clientId', String(params.clientId))
+    if (params?.siteId) q.set('siteId', String(params.siteId))
+    const s = q.toString()
+    return request<BillingInvoice[]>(`/billing/invoices${s ? `?${s}` : ''}`)
+  },
+  pay: (id: number, data: { amount?: string; method?: string; reference?: string; note?: string }) =>
+    request<{ fullyPaid: boolean; balance: number; restored: boolean; duplicate: boolean }>(
+      `/billing/invoices/${id}/pay`, { method: 'POST', body: JSON.stringify(data) }),
+  voidInvoice: (id: number) =>
+    request<{ voided: true }>(`/billing/invoices/${id}/void`, { method: 'POST', body: '{}' }),
+
+  defaultPolicy: () => request<{ policy: DunningStep[] }>('/billing/default-policy'),
+  profitability: () => request<Array<{
+    siteId: number; domain: string; client: string; amount: number; currency: string
+    amountFormatted: string; serverId: number | null; sitesOnServer: number
+    status: string; enforcementLevel: EnforcementLevel
+  }>>('/billing/profitability')
+}
+
+/** Format minor units for display, e.g. 3000 → "30.00 ₾". */
+export function formatMinor(minor: number, currency = 'GEL'): string {
+  const n = (minor / 100).toFixed(2)
+  if (currency === 'USD') return `$${n}`
+  if (currency === 'EUR') return `€${n}`
+  return `${n} ₾`
+}
