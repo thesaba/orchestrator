@@ -363,6 +363,7 @@ function AddSubscriptionModal({
   const [siteId, setSiteId] = useState('')
   const [clientId, setClientId] = useState(clients[0] ? String(clients[0].id) : '')
   const [amount, setAmount] = useState('')
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10))
   const [anchorDay, setAnchorDay] = useState('')
   const [grace, setGrace] = useState('3')
   const [vip, setVip] = useState(false)
@@ -383,6 +384,8 @@ function AddSubscriptionModal({
         siteId: Number(siteId),
         clientId: Number(clientId),
         amount,
+        // Midday UTC keeps the calendar day stable in Asia/Tbilisi (UTC+4).
+        startDate: startDate ? `${startDate}T12:00:00.000Z` : undefined,
         anchorDay: anchorDay ? Number(anchorDay) : null,
         gracePeriodDays: Number(grace) || 0,
         neverAutoSuspend: vip
@@ -402,7 +405,9 @@ function AddSubscriptionModal({
           <Select label="Site" options={sites} value={siteId} onChange={setSiteId} />
           <Select label="Client" options={clients.map((c) => ({ label: c.name, value: String(c.id) }))} value={clientId} onChange={setClientId} />
           <TextField label="Monthly amount" value={amount} onChange={setAmount} autoComplete="off" placeholder="30" helpText="In major units, e.g. 30 or 30.50" />
-          <TextField label="Billing day of month" type="number" min={1} max={28} value={anchorDay} onChange={setAnchorDay} autoComplete="off" helpText="1–28. Each client can bill on a different day. Leave blank to use the start date." />
+          <TextField label="First invoice date" type="date" value={startDate} onChange={setStartDate} autoComplete="off"
+            helpText="The first invoice is issued — and falls due — on this date. Every later invoice uses the billing day below. Backdate it to test the overdue ladder." />
+          <TextField label="Billing day of month" type="number" min={1} max={28} value={anchorDay} onChange={setAnchorDay} autoComplete="off" helpText="1–28. Each client can bill on a different day. Leave blank to reuse the first invoice date's day." />
           <TextField label="Grace period (days)" type="number" min={0} value={grace} onChange={setGrace} autoComplete="off" helpText="Enforcement is withheld this many days past the due date. Reminders still go out." />
           <Select label="Auto-suspend" value={vip ? 'no' : 'yes'} onChange={(v) => setVip(v === 'no')}
             options={[{ label: 'Yes — follow the full ladder', value: 'yes' }, { label: 'No — never suspend (VIP), stop at banner', value: 'no' }]} />
