@@ -27,6 +27,15 @@ export default defineConfig({
         ]
       },
       workbox: {
+        // Take control immediately on update instead of waiting for every tab
+        // to close. Without these, a new build's service worker sits in
+        // "waiting" while the old one keeps serving the precached index.html —
+        // so a normal Cmd+R shows the OLD app and only Cmd+Shift+R (which
+        // bypasses the SW) shows the new one. skipWaiting + clientsClaim make
+        // the fresh SW activate and control all open pages right away.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
