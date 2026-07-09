@@ -203,6 +203,18 @@ export async function recordPayment(
   }
 }
 
+/**
+ * The single source of truth for "how much is still owed on this invoice".
+ *
+ * A voided invoice is owed by nobody. Computing this inline in more than one
+ * place is how the client portal once told a client they owed 100 ₾ while the
+ * panel said 50 ₾ — it summed the voided invoice too. Every view must call this.
+ */
+export function invoiceBalance(inv: { status: string; amount: number; amountPaid: number }): number {
+  if (inv.status === 'void') return 0
+  return balanceDue(inv.amount, inv.amountPaid)
+}
+
 /** All invoices still owing money, oldest first. */
 export async function openInvoices(prisma: any, clientId?: number) {
   return prisma.invoice.findMany({

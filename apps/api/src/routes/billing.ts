@@ -15,6 +15,7 @@ import {
   recordPayment,
   openInvoices,
   agingBuckets,
+  invoiceBalance,
   mrr
 } from '../lib/billing/invoices'
 import { applyEnforcement, restoreSite, enforcementMode, ENFORCEMENT_KEY, EnforcementMode } from '../lib/billing/enforce'
@@ -406,7 +407,7 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
     })
     return invoices.map((i: any) => ({
       ...i,
-      balance: balanceDue(i.amount, i.amountPaid),
+      balance: invoiceBalance(i),
       amountFormatted: formatMoney(i.amount, i.currency)
     }))
   })
@@ -551,11 +552,15 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       where: { status: { not: 'cancelled' } },
       include: { site: true, client: true }
     })
-    // Latest metric sample per server gives a coarse load signal we can
-    // attribute across the sites hosted on it — enough to spot the outliers.
+
+    // Crowding must be measured against EVERY site on the box, not just the
+    // billed ones. A server full of unbilled sites is exactly the situation
+    // this report exists to surface — counting only subscriptions would have
+    // reported "1 site on server" for a box hosting seven.
+    const allSites = await db.site.findMany({ select: { serverId: true } })
     const sitesPerServer = new Map<number | null, number>()
-    for (const s of subs) {
-      const key = s.site?.serverId ?? null
+    for (const s of allSites) {
+      const key = s.serverId ?? null
       sitesPerServer.set(key, (sitesPerServer.get(key) ?? 0) + 1)
     }
     return subs.map((s: any) => ({

@@ -11,7 +11,8 @@
  */
 
 import { FastifyPluginAsync } from 'fastify'
-import { balanceDue, formatMoney } from '../lib/billing/money'
+import { formatMoney } from '../lib/billing/money'
+import { invoiceBalance } from '../lib/billing/invoices'
 
 export const portalRoutes: FastifyPluginAsync = async (app) => {
   const db = app.prisma as any
@@ -33,7 +34,11 @@ export const portalRoutes: FastifyPluginAsync = async (app) => {
 
     const invoices = client.invoices
       .filter((i: any) => i.status !== 'draft')
-      .map((i: any) => ({
+      .map((i: any) => {
+        // A voided invoice stays visible as history, but nobody owes it a
+        // tetri. Shared helper so the portal and the panel can never disagree.
+        const balance = invoiceBalance(i)
+        return ({
         number: i.number,
         periodStart: i.periodStart,
         periodEnd: i.periodEnd,
@@ -41,10 +46,10 @@ export const portalRoutes: FastifyPluginAsync = async (app) => {
         status: i.status,
         amount: i.amount,
         amountPaid: i.amountPaid,
-        balance: balanceDue(i.amount, i.amountPaid),
+        balance,
         currency: i.currency,
         amountFormatted: formatMoney(i.amount, i.currency),
-        balanceFormatted: formatMoney(balanceDue(i.amount, i.amountPaid), i.currency),
+        balanceFormatted: formatMoney(balance, i.currency),
         paidAt: i.paidAt,
         payments: i.payments.map((p: any) => ({
           amount: p.amount,
@@ -52,7 +57,8 @@ export const portalRoutes: FastifyPluginAsync = async (app) => {
           method: p.method,
           receivedAt: p.receivedAt
         }))
-      }))
+        })
+      })
 
     const outstanding = invoices.reduce((s: number, i: any) => s + i.balance, 0)
 

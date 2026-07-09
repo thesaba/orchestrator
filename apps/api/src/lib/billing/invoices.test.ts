@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { agingBuckets, mrr } from './invoices'
+import { agingBuckets, mrr, invoiceBalance } from './invoices'
 
 const NOW = new Date('2026-03-01T12:00:00Z')
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000)
@@ -35,6 +35,28 @@ test('a partially paid invoice ages only its remaining balance', () => {
 test('overpayment never produces a negative bucket', () => {
   const b = agingBuckets([{ amount: 1000, amountPaid: 4000, dueDate: daysAgo(10) }], NOW)
   assert.equal(b.total, 0)
+})
+
+// ── invoiceBalance: the panel and the client portal must never disagree ─────
+
+test('a voided invoice is owed by nobody', () => {
+  assert.equal(invoiceBalance({ status: 'void', amount: 5000, amountPaid: 0 }), 0)
+})
+
+test('open / partial / overdue invoices owe their remaining balance', () => {
+  assert.equal(invoiceBalance({ status: 'open', amount: 5000, amountPaid: 0 }), 5000)
+  assert.equal(invoiceBalance({ status: 'partial', amount: 5000, amountPaid: 2000 }), 3000)
+  assert.equal(invoiceBalance({ status: 'overdue', amount: 5000, amountPaid: 0 }), 5000)
+  assert.equal(invoiceBalance({ status: 'paid', amount: 5000, amountPaid: 5000 }), 0)
+})
+
+test('summing balances excludes voided invoices (the portal-vs-panel bug)', () => {
+  const invoices = [
+    { status: 'open', amount: 5000, amountPaid: 0 },
+    { status: 'void', amount: 5000, amountPaid: 0 } // must NOT add 50.00
+  ]
+  const outstanding = invoices.reduce((s, i) => s + invoiceBalance(i), 0)
+  assert.equal(outstanding, 5000)
 })
 
 // ── MRR ─────────────────────────────────────────────────────────────────────
