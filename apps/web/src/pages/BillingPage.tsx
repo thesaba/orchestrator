@@ -286,15 +286,20 @@ function SubscriptionsTab({
 
   return (
     <BlockStack gap="300">
-      <InlineStack align="end"><Button variant="primary" onClick={() => setAdding(true)}>Add subscription</Button></InlineStack>
       <Card>
-        {rows.length === 0
-          ? <Box padding="400"><Text as="p" tone="subdued">No subscriptions yet.</Text></Box>
-          : <DataTable
-              columnContentTypes={['text', 'text', 'numeric', 'text', 'text', 'text']}
-              headings={['Site', 'Client', 'Amount', 'Next invoice', 'State', '']}
-              rows={rows}
-            />}
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <Text as="h2" variant="headingMd">Subscriptions</Text>
+            <Button variant="primary" onClick={() => setAdding(true)}>Add subscription</Button>
+          </InlineStack>
+          {rows.length === 0
+            ? <Text as="p" tone="subdued">No subscriptions yet.</Text>
+            : <DataTable
+                columnContentTypes={['text', 'text', 'numeric', 'text', 'text', 'text']}
+                headings={['Site', 'Client', 'Amount', 'Next invoice', 'State', '']}
+                rows={rows}
+              />}
+        </BlockStack>
       </Card>
 
       {adding && <AddSubscriptionModal clients={clients} onClose={() => setAdding(false)} onDone={() => { setAdding(false); notify('Subscription created'); onChanged() }} onError={onError} />}
@@ -436,7 +441,8 @@ function InvoicesTab({
     i.site?.domain ?? '—',
     i.client?.name ?? '—',
     formatMinor(i.amount, i.currency),
-    i.balance > 0 ? formatMinor(i.balance, i.currency) : '—',
+    // A voided invoice is owed by nobody — showing its balance is misleading.
+    i.status !== 'void' && i.balance > 0 ? formatMinor(i.balance, i.currency) : '—',
     new Date(i.dueDate).toISOString().slice(0, 10),
     <Badge key={`s${i.id}`} tone={INVOICE_TONE[i.status] ?? 'info'}>{i.status}</Badge>,
     <InlineStack key={`a${i.id}`} gap="100">
@@ -549,15 +555,20 @@ function ClientsTab({
 
   return (
     <BlockStack gap="300">
-      <InlineStack align="end"><Button variant="primary" onClick={() => setAdding(true)}>Add client</Button></InlineStack>
       <Card>
-        {rows.length === 0
-          ? <Box padding="400"><Text as="p" tone="subdued">No clients yet.</Text></Box>
-          : <DataTable
-              columnContentTypes={['text', 'text', 'text', 'numeric', 'text']}
-              headings={['Name', 'Contact', 'Sites', 'Outstanding', '']}
-              rows={rows}
-            />}
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <Text as="h2" variant="headingMd">Clients</Text>
+            <Button variant="primary" onClick={() => setAdding(true)}>Add client</Button>
+          </InlineStack>
+          {rows.length === 0
+            ? <Text as="p" tone="subdued">No clients yet.</Text>
+            : <DataTable
+                columnContentTypes={['text', 'text', 'text', 'numeric', 'text']}
+                headings={['Name', 'Contact', 'Sites', 'Outstanding', '']}
+                rows={rows}
+              />}
+        </BlockStack>
       </Card>
       {adding && (
         <AddClientModal
