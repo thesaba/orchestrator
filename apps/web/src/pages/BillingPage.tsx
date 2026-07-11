@@ -406,7 +406,11 @@ function AddSubscriptionModal({
   const [amount, setAmount] = useState('')
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10))
   const [anchorDay, setAnchorDay] = useState('')
+  // 'gradual' = the built-in ladder (banner → restrict → suspend over ~10 days).
+  // 'simple'  = suspend exactly N days after the invoice falls due.
+  const [mode, setMode] = useState<'gradual' | 'simple'>('gradual')
   const [grace, setGrace] = useState('3')
+  const [suspendAfter, setSuspendAfter] = useState('1')
   const [vip, setVip] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -421,6 +425,8 @@ function AddSubscriptionModal({
   const submit = async () => {
     setBusy(true)
     try {
+      const simple = mode === 'simple'
+      const n = Math.max(0, Number(suspendAfter) || 0)
       await billingApi.createSubscription({
         siteId: Number(siteId),
         clientId: Number(clientId),
@@ -428,7 +434,15 @@ function AddSubscriptionModal({
         // Midday UTC keeps the calendar day stable in Asia/Tbilisi (UTC+4).
         startDate: startDate ? `${startDate}T12:00:00.000Z` : undefined,
         anchorDay: anchorDay ? Number(anchorDay) : null,
-        gracePeriodDays: Number(grace) || 0,
+        // In simple mode the custom policy defines the exact timing, so grace
+        // must be 0 or it would delay the suspension the operator just set.
+        gracePeriodDays: simple ? 0 : (Number(grace) || 0),
+        dunningPolicy: simple
+          ? [
+              { offsetDays: 0, action: 'invoice_due' },
+              { offsetDays: n, action: 'suspend' }
+            ]
+          : undefined,
         neverAutoSuspend: vip
       })
       onDone()
@@ -449,9 +463,20 @@ function AddSubscriptionModal({
           <TextField label="First invoice date" type="date" value={startDate} onChange={setStartDate} autoComplete="off"
             helpText="The first invoice is issued — and falls due — on this date. Every later invoice uses the billing day below. Backdate it to test the overdue ladder." />
           <TextField label="Billing day of month" type="number" min={1} max={28} value={anchorDay} onChange={setAnchorDay} autoComplete="off" helpText="1–28. Each client can bill on a different day. Leave blank to reuse the first invoice date's day." />
-          <TextField label="Grace period (days)" type="number" min={0} value={grace} onChange={setGrace} autoComplete="off" helpText="Enforcement is withheld this many days past the due date. Reminders still go out." />
+
+          <Select label="Suspension timing" value={mode} onChange={(v) => setMode(v as 'gradual' | 'simple')}
+            options={[
+              { label: 'Gradual — banner → restrict → suspend over ~10 days', value: 'gradual' },
+              { label: 'Simple — suspend N days after the due date', value: 'simple' }
+            ]} />
+
+          {mode === 'gradual'
+            ? <TextField label="Grace period (days)" type="number" min={0} value={grace} onChange={setGrace} autoComplete="off" helpText="Enforcement is withheld this many days past the due date. Reminders still go out." />
+            : <TextField label="Suspend after (days overdue)" type="number" min={0} value={suspendAfter} onChange={setSuspendAfter} autoComplete="off"
+                helpText="e.g. 1 = suspend the day after the invoice is due (bill on the 10th → suspend on the 11th). 0 = suspend on the due date itself." />}
+
           <Select label="Auto-suspend" value={vip ? 'no' : 'yes'} onChange={(v) => setVip(v === 'no')}
-            options={[{ label: 'Yes — follow the full ladder', value: 'yes' }, { label: 'No — never suspend (VIP), stop at banner', value: 'no' }]} />
+            options={[{ label: 'Yes — follow the timing above', value: 'yes' }, { label: 'No — never suspend (VIP), stop at banner', value: 'no' }]} />
         </BlockStack>
       </Modal.Section>
     </Modal>

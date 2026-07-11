@@ -1548,7 +1548,7 @@ export const billingApi = {
   createSubscription: (data: {
     siteId: number; clientId: number; amount: number | string; currency?: string
     interval?: string; startDate?: string; anchorDay?: number | null
-    gracePeriodDays?: number; neverAutoSuspend?: boolean
+    gracePeriodDays?: number; neverAutoSuspend?: boolean; dunningPolicy?: DunningStep[]
   }) => request<BillingSubscription>('/billing/subscriptions', { method: 'POST', body: JSON.stringify(data) }),
   updateSubscription: (id: number, data: Record<string, unknown>) =>
     request<BillingSubscription>(`/billing/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
