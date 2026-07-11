@@ -97,6 +97,22 @@ test('a policy with no suspend step never suspends', () => {
   assert.equal(resolveLadder(DUE, at(999), p).targetLevel, 'banner')
 })
 
+// ── the wrong-suspension guards, as pure assertions ──────────────────────────
+
+test('an invoice not yet due never drives any enforcement', () => {
+  // Future due date → negative overdue → level none, whatever the policy.
+  for (const d of [-1, -7, -30]) {
+    assert.equal(resolveLadder(DUE, at(d), DEFAULT_DUNNING_POLICY).targetLevel, 'none')
+  }
+})
+
+test('grace fully covering the first enforcement rung yields no enforcement', () => {
+  // banner is +4; a 5-day grace means day 4 is still inside grace.
+  const r = resolveLadder(DUE, at(4), DEFAULT_DUNNING_POLICY, { gracePeriodDays: 5 })
+  assert.equal(r.targetLevel, 'none')
+  assert.equal(r.withinGrace, true)
+})
+
 // ── preview ─────────────────────────────────────────────────────────────────
 
 test('nextStep previews the upcoming action and its date', () => {

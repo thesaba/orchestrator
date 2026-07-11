@@ -108,8 +108,11 @@ export async function runBillingTick(
   }
 
   // ── 2. Walk every subscription and reconcile it with the ladder ───────────
+  // Only states that may legitimately be enforced. An allowlist (not "!=
+  // cancelled") so that a future/unexpected status — e.g. a paused account —
+  // can never be silently swept into the enforcement path.
   const subs = await prisma.subscription.findMany({
-    where: { status: { not: 'cancelled' } },
+    where: { status: { in: ['active', 'past_due', 'suspended'] } },
     include: { site: true, client: true, plan: true }
   })
 

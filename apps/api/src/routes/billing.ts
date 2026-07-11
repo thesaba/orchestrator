@@ -296,17 +296,28 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // First invoice is due immediately at `start`; the anchor then repeats.
-    const sub = existing
-      ? await db.subscription.update({
-          where: { id: existing.id },
-          // Reactivate: fresh billing state, enforcement cleared, cancel undone.
-          data: { ...data, status: 'active', enforcementLevel: 'none', cancelledAt: null, suspendedAt: null },
-          include: { site: true, client: true }
-        })
-      : await db.subscription.create({
-          data: { siteId: b.siteId, ...data },
-          include: { site: true, client: true }
-        })
+    let sub
+    if (existing) {
+      // Belt-and-braces: void any leftover open invoices from the previous life
+      // BEFORE reactivating, so the ladder can never suspend the site over a
+      // stale period (covers subscriptions cancelled before void-on-cancel
+      // existed).
+      await db.invoice.updateMany({
+        where: { subscriptionId: existing.id, status: { in: ['open', 'partial', 'overdue'] } },
+        data: { status: 'void' }
+      })
+      sub = await db.subscription.update({
+        where: { id: existing.id },
+        // Reactivate: fresh billing state, enforcement cleared, cancel undone.
+        data: { ...data, status: 'active', enforcementLevel: 'none', cancelledAt: null, suspendedAt: null },
+        include: { site: true, client: true }
+      })
+    } else {
+      sub = await db.subscription.create({
+        data: { siteId: b.siteId, ...data },
+        include: { site: true, client: true }
+      })
+    }
 
     app.audit(existing ? 'billing.subscription_reactivated' : 'billing.subscription_created', {
       req: request,
@@ -342,9 +353,31 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
     if (found && found.sub.enforcementLevel !== 'none') {
       await restoreSite(app, found.subject, { subscriptionId: id })
     }
-    await db.subscription.update({ where: { id }, data: { status: 'cancelled', cancelledAt: new Date() } })
-    app.audit('billing.subscription_cancelled', { req: request, meta: { subscriptionId: id } })
-    return { cancelled: true }
+
+    // Void the still-open invoices. Two reasons:
+    //  • the client should no longer owe for a site we stopped billing, so
+    //    their portal outstanding drops to 0; and
+    //  • it removes the trap where re-adding billing later (reactivation)
+    //    would resurrect a months-old overdue invoice and INSTANTLY suspend
+    //    the site over a period that no longer applies.
+    const voided = await db.invoice.updateMany({
+      where: { subscriptionId: id, status: { in: ['open', 'partial', 'overdue'] } },
+      data: { status: 'void' }
+    })
+
+    await db.subscription.update({
+      where: { id },
+      data: { status: 'cancelled', cancelledAt: new Date(), enforcementLevel: 'none', suspendedAt: null }
+    })
+    await db.billingEvent.create({
+      data: {
+        subscriptionId: id,
+        type: 'cancelled',
+        detail: voided.count ? `billing cancelled; ${voided.count} open invoice(s) voided` : 'billing cancelled'
+      }
+    }).catch(() => {})
+    app.audit('billing.subscription_cancelled', { req: request, meta: { subscriptionId: id, invoicesVoided: voided.count } })
+    return { cancelled: true, invoicesVoided: voided.count }
   })
 
   /** "What happens next" — never surprise the operator. */

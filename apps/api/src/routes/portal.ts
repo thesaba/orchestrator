@@ -32,8 +32,18 @@ export const portalRoutes: FastifyPluginAsync = async (app) => {
     })
     if (!client || client.archived) return reply.code(404).send({ error: 'Not found' })
 
+    // A portal exists to show a client what they owe. Once the client has no
+    // active billing at all (every subscription cancelled), the link should go
+    // dead rather than keep exposing stale invoices — this is what makes
+    // "cancel billing" also retire the client's portal. It comes back on its
+    // own if billing is re-added (the token lives on the client).
+    const hasActiveBilling = client.subscriptions.some((s: any) => s.status !== 'cancelled')
+    if (!hasActiveBilling) return reply.code(404).send({ error: 'Not found' })
+
     const invoices = client.invoices
-      .filter((i: any) => i.status !== 'draft')
+      // Voided invoices (incl. those voided by a cancellation) are internal
+      // history — never show them to the client.
+      .filter((i: any) => i.status !== 'draft' && i.status !== 'void')
       .map((i: any) => {
         // A voided invoice stays visible as history, but nobody owes it a
         // tetri. Shared helper so the portal and the panel can never disagree.
