@@ -439,9 +439,25 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
     const siteId = Number((request.params as { siteId: string }).siteId)
     const site = await app.prisma.site.findUnique({
       where: { id: siteId },
-      select: { id: true, sslEnabled: true, maintenanceMode: true, uptimeMonitor: true }
+      select: {
+        id: true, sslEnabled: true, maintenanceMode: true, uptimeMonitor: true,
+        subscription: { select: { enforcementLevel: true } }
+      }
     })
     if (!site) return { score: 0, breakdown: {} }
+
+    // A billing-suspended site is not "healthy", period. Report it as suspended
+    // with a critical score so it never shows green in the panel — regardless
+    // of its last deploy or SSL state.
+    const lvl = (site as any).subscription?.enforcementLevel ?? 'none'
+    if (lvl === 'suspend' || lvl === 'archived') {
+      return {
+        score: 0,
+        suspended: true,
+        enforcementLevel: lvl,
+        breakdown: { uptime: 0, deploy: 0, ssl: 0, maintenance: 0 }
+      }
+    }
 
     // Uptime score (40pts): based on last 24h uptime checks
     const since24h = new Date(Date.now() - 86400_000)
@@ -474,6 +490,8 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
     const total = uptimeScore + deployScore + sslScore + maintScore
     return {
       score: total,
+      suspended: false,
+      enforcementLevel: lvl,
       breakdown: { uptime: uptimeScore, deploy: deployScore, ssl: sslScore, maintenance: maintScore }
     }
   })

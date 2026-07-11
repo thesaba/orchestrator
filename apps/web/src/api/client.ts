@@ -1052,7 +1052,7 @@ export interface LogEntry {
 
 export const healthApi = {
   score: (siteId: number) =>
-    request<{ score: number; breakdown: { uptime: number; deploy: number; ssl: number; maintenance: number } }>(
+    request<{ score: number; suspended?: boolean; enforcementLevel?: string; breakdown: { uptime: number; deploy: number; ssl: number; maintenance: number } }>(
       `/monitor/health-score/${siteId}`
     )
 }

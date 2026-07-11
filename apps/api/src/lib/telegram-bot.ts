@@ -67,6 +67,7 @@ function mainMenu(user: BotUser): InlineKeyboard {
     { text: '🔧 Services', callback_data: 'svcs' },
     { text: '🐞 Errors', callback_data: 'errs' }
   ])
+  if (isAdmin(user)) rows.push([{ text: '💰 Billing', callback_data: 'bills' }])
   return { inline_keyboard: rows }
 }
 
@@ -113,7 +114,7 @@ async function handleMessage(app: FastifyInstance, token: string, msg: any): Pro
   if (cmd === '/tasks')  return void tgSend(token, chatId, ...(await tasksView(app, user)))
   if (cmd === '/help' || cmd === '/menu') {
     return void tgSend(token, chatId,
-      '<b>Orchestrator bot</b>\nManage your sites & tasks from here.\n\n/sites — your sites\n/tasks — your tasks\n/task &lt;title&gt; — quick task\n/status — server status (admin)\n\n<b>Billing (admin)</b>\n/invoices — everything still owed\n/overdue — only past-due invoices\n/paid &lt;id|number&gt; — mark an invoice fully paid\n\nTip: use the buttons below or under each message.',
+      '<b>Orchestrator bot</b>\nManage your sites & tasks from here.\n\n/sites — your sites\n/tasks — your tasks\n/task &lt;title&gt; — quick task\n/status — server status (admin)\n\n<b>Billing (admin)</b>\n/billing — board with Mark-paid buttons\n/invoices — everything still owed\n/overdue — only past-due invoices\n/paid &lt;id|number&gt; — mark an invoice fully paid\n\nTip: use the buttons below or under each message.',
       REPLY_KB).then(() => tgSend(token, chatId, 'Main menu:', mainMenu(user)))
   }
   if (text.startsWith('/task ')) {
@@ -125,6 +126,9 @@ async function handleMessage(app: FastifyInstance, token: string, msg: any): Pro
 
   // ── Billing (admin-only; callApi injects the user's own role, so a
   //    non-admin simply gets a 403 back and is told so) ─────────────────────
+  if (cmd === '/billing') {
+    return void tgSend(token, chatId, ...(await billingBoardView(app, user)))
+  }
   if (cmd === '/invoices' || cmd === '/overdue') {
     return void tgSend(token, chatId, await billingListView(app, user, cmd === '/overdue'))
   }
@@ -195,6 +199,12 @@ async function handleCallback(app: FastifyInstance, token: string, cq: any): Pro
       if (status >= 300) return void edit('⚠️ Could not update task.', backTo('tasks'))
       return void edit(...(await tasksView(app, user)))
     }
+
+    // ── Billing (admin-only, enforced by the API's role check) ───────────────
+    case 'bills':    return void edit(...(await billingBoardView(app, user)))
+    case 'bill_paid': return void edit(await markPaidById(app, user, Number(parts[1])), { inline_keyboard: [[{ text: '⬅️ Billing', callback_data: 'bills' }]] })
+    case 'bill_restore': return void edit(await restoreSiteBilling(app, user, Number(parts[1])), backTo(`site:${parts[1]}`))
+
     default: return void edit('Unknown action.', mainMenu(user))
   }
 }
@@ -204,6 +214,9 @@ const backTo = (cb: string): InlineKeyboard => ({ inline_keyboard: [[{ text: '�
 // ── Views (return [text, keyboard]) ──────────────────────────────────────────
 
 function siteStatusEmoji(s: any): string {
+  // Billing state wins over deploy state: a suspended site is never green.
+  if (s.billingSuspended) return '🚫'
+  if (s.billingPastDue) return '💸'
   const st = s.deployments?.[0]?.status
   if (st === 'success') return '🟢'
   if (st === 'failed') return '🔴'
@@ -225,14 +238,24 @@ async function siteView(app: FastifyInstance, user: BotUser, siteId: number): Pr
   const site = (Array.isArray(body) ? body : []).find((s: any) => s.id === siteId)
   if (!site) return ['Site not found or no access.', backTo('sites')]
   const last = site.deployments?.[0]
+  const billingLine = site.billingSuspended
+    ? '🚫 <b>Suspended — unpaid</b>'
+    : site.billingPastDue
+      ? '💸 <b>Past due</b>'
+      : ''
   const lines = [
     `<b>${escapeHtml(site.domain)}</b>`,
+    billingLine,
     `PHP ${site.phpVersion} · ${site.sslEnabled ? '🔒 SSL' : 'no SSL'}${site.maintenanceMode ? ' · 🔧 maintenance' : ''}`,
     `Last deploy: ${last ? `${last.status} — ${last.branch}${last.commit ? ` @ ${last.commit}` : ''}` : '—'}`,
     site.sslDaysLeft != null ? `SSL: ${site.sslDaysLeft}d left` : ''
   ].filter(Boolean)
 
   const rows: { text: string; callback_data: string }[][] = []
+  // Billing: lift the suspension straight from the site card (admin only).
+  if (isAdmin(user) && (site.billingSuspended || site.billingPastDue)) {
+    rows.push([{ text: '🔓 Restore (lift suspension)', callback_data: `bill_restore:${siteId}` }])
+  }
   if (canWrite(user)) {
     rows.push([
       { text: '🚀 Deploy', callback_data: `deploy:${siteId}` },
@@ -443,4 +466,58 @@ async function markPaidView(app: FastifyInstance, user: BotUser, arg: string): P
     : `✅ Payment recorded. Remaining: <b>${money(body?.balance ?? 0)}</b>`
   const restored = body?.restored ? '\n🔓 Site restored — enforcement lifted.' : ''
   return `${paid}${restored}`
+}
+
+// ── Billing board + actions (inline-button driven) ───────────────────────────
+
+/** Overview + tap-to-pay list of unpaid invoices. */
+async function billingBoardView(app: FastifyInstance, user: BotUser): Promise<[string, InlineKeyboard]> {
+  const ov = await callApi(app, user, 'GET', '/api/billing/overview')
+  if (ov.status === 403) return ['🚫 Billing is admin-only.', mainMenu(user)]
+  if (ov.status >= 300) return ['⚠️ Could not load billing.', mainMenu(user)]
+  const o = ov.body ?? {}
+
+  const inv = await callApi(app, user, 'GET', '/api/billing/invoices')
+  const unpaid = (Array.isArray(inv.body) ? inv.body : [])
+    .filter((i: any) => ['open', 'partial', 'overdue'].includes(i.status))
+
+  const head = [
+    '💰 <b>Billing</b>',
+    `MRR <b>${money(o.mrr ?? 0, o.currency)}</b> · Outstanding <b>${money(o.outstanding ?? 0, o.currency)}</b>`,
+    `Suspended: ${o.suspended ?? 0} · Past due: ${o.pastDue ?? 0}`,
+    unpaid.length ? '\nUnpaid — tap to mark fully paid:' : '\n✅ Nothing outstanding.'
+  ].join('\n')
+
+  const rows = unpaid.slice(0, 12).map((i: any) => [{
+    text: `✅ ${i.number} · ${i.site?.domain ?? i.client?.name ?? ''} · ${money(i.balance ?? i.amount, i.currency)}`,
+    callback_data: `bill_paid:${i.id}`
+  }])
+  rows.push([{ text: '⬅️ Menu', callback_data: 'menu' }])
+  return [head, { inline_keyboard: rows }]
+}
+
+/** Mark one invoice fully paid (cash, source=telegram); auto-restores the site. */
+async function markPaidById(app: FastifyInstance, user: BotUser, invoiceId: number): Promise<string> {
+  const { status, body } = await callApi(app, user, 'POST', `/api/billing/invoices/${invoiceId}/pay`, {
+    method: 'cash',
+    source: 'telegram',
+    note: `Marked paid via Telegram by ${user.email}`
+  })
+  if (status === 403) return '🚫 Billing is admin-only.'
+  if (status === 404) return '⚠️ Invoice not found.'
+  if (status >= 300) return `⚠️ ${escapeHtml(body?.error ?? 'Could not record the payment.')}`
+  const paid = body?.fullyPaid ? '✅ Invoice fully paid.' : `✅ Payment recorded. Remaining: <b>${money(body?.balance ?? 0)}</b>`
+  return paid + (body?.restored ? '\n🔓 Site restored — suspension lifted.' : '')
+}
+
+/** Lift billing enforcement (banner/restrict/suspend) for a site by its id. */
+async function restoreSiteBilling(app: FastifyInstance, user: BotUser, siteId: number): Promise<string> {
+  const subs = await callApi(app, user, 'GET', '/api/billing/subscriptions')
+  if (subs.status === 403) return '🚫 Billing is admin-only.'
+  if (subs.status >= 300) return '⚠️ Could not load subscriptions.'
+  const sub = (Array.isArray(subs.body) ? subs.body : []).find((s: any) => s.siteId === siteId)
+  if (!sub) return '⚠️ This site has no billing subscription.'
+  const { status, body } = await callApi(app, user, 'POST', `/api/billing/subscriptions/${sub.id}/enforce`, { level: 'none' })
+  if (status >= 300) return `⚠️ ${escapeHtml(body?.error ?? 'Could not restore.')}`
+  return body?.applied ? '🔓 Restored — suspension lifted.' : `ℹ️ ${escapeHtml(body?.reason ?? 'Nothing to restore.')}`
 }

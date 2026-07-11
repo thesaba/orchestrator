@@ -40,7 +40,12 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     const sites = await app.prisma.site.findMany({
       where,
       orderBy: [{ pinned: 'desc' }, { createdAt: 'desc' }],
-      include: { deployments: { take: 1, orderBy: { createdAt: 'desc' } } }
+      include: {
+        deployments: { take: 1, orderBy: { createdAt: 'desc' } },
+        // Billing enforcement state, so the list can show a suspended site as
+        // suspended instead of green/healthy.
+        subscription: { select: { enforcementLevel: true, status: true } }
+      }
     })
 
     // Attach cached SSL expiry (populated by the background SSL monitor) so the
@@ -57,11 +62,19 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
       } catch { /* ignore malformed cache */ }
     }
 
-    return sites.map((s) => ({
-      ...redactGitToken(s),
-      sslDaysLeft: sslBySite.get(s.id)?.daysLeft ?? null,
-      sslExpiresAt: sslBySite.get(s.id)?.expiresAt ?? null
-    }))
+    return sites.map((s) => {
+      const lvl = (s as any).subscription?.enforcementLevel ?? 'none'
+      const { subscription, ...rest } = s as any
+      return {
+        ...redactGitToken(rest),
+        sslDaysLeft: sslBySite.get(s.id)?.daysLeft ?? null,
+        sslExpiresAt: sslBySite.get(s.id)?.expiresAt ?? null,
+        // Flattened billing state for the UI + bot.
+        enforcementLevel: lvl,
+        billingSuspended: lvl === 'suspend' || lvl === 'archived',
+        billingPastDue: lvl === 'banner' || lvl === 'restrict'
+      }
+    })
   })
 
   app.get('/:id', async (request, reply) => {

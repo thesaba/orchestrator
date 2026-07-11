@@ -5,16 +5,32 @@ interface Props { siteId: number }
 
 export function HealthScoreBadge({ siteId }: Props) {
   const [score, setScore] = useState<number | null>(null)
+  const [suspended, setSuspended] = useState(false)
   const [breakdown, setBreakdown] = useState<{ uptime: number; deploy: number; ssl: number; maintenance: number } | null>(null)
   const [showTooltip, setShowTooltip] = useState(false)
 
   useEffect(() => {
     healthApi.score(siteId)
-      .then(r => { setScore(r.score); setBreakdown(r.breakdown) })
+      .then(r => { setScore(r.score); setBreakdown(r.breakdown); setSuspended(!!r.suspended) })
       .catch(() => {})
   }, [siteId])
 
   if (score === null) return null
+
+  // A billing-suspended site is shown as a plain red "Suspended" pill — never
+  // a health score, so it can't read as green/healthy.
+  if (suspended) {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        background: '#ff6b6b22', color: '#ff6b6b', border: '1px solid #ff6b6b55',
+        borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 600, userSelect: 'none'
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ff6b6b', display: 'inline-block' }} />
+        Suspended — unpaid
+      </span>
+    )
+  }
 
   const color = score >= 80 ? '#37b24d' : score >= 60 ? '#ffa94d' : '#ff6b6b'
   const label = score >= 80 ? 'Healthy' : score >= 60 ? 'Degraded' : 'Critical'
