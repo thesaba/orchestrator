@@ -258,6 +258,7 @@ function SubscriptionsTab({
 }) {
   const [adding, setAdding] = useState(false)
   const [previewFor, setPreviewFor] = useState<BillingSubscription | null>(null)
+  const [cancelling, setCancelling] = useState<BillingSubscription | null>(null)
 
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     try { await fn(); notify(msg); onChanged() } catch (e) { onError((e as Error).message) }
@@ -281,6 +282,7 @@ function SubscriptionsTab({
             Restore
           </Button>
         )}
+        <Button size="micro" tone="critical" onClick={() => setCancelling(s)}>Cancel billing</Button>
       </InlineStack>
     ])
 
@@ -304,6 +306,39 @@ function SubscriptionsTab({
 
       {adding && <AddSubscriptionModal clients={clients} onClose={() => setAdding(false)} onDone={() => { setAdding(false); notify('Subscription created'); onChanged() }} onError={onError} />}
       {previewFor && <PreviewModal sub={previewFor} onClose={() => setPreviewFor(null)} />}
+      {cancelling && (
+        <Modal
+          open
+          onClose={() => setCancelling(null)}
+          title={`Cancel billing — ${cancelling.site?.domain ?? ''}`}
+          primaryAction={{
+            content: 'Cancel billing',
+            destructive: true,
+            onAction: async () => {
+              const id = cancelling.id
+              setCancelling(null)
+              await act(() => billingApi.cancelSubscription(id), 'Billing cancelled — the site is untouched')
+            }
+          }}
+          secondaryActions={[{ content: 'Keep billing', onAction: () => setCancelling(null) }]}
+        >
+          <Modal.Section>
+            <BlockStack gap="200">
+              <Text as="p">
+                Stop billing <b>{cancelling.site?.domain}</b>. No further invoices are issued and the
+                dunning ladder stops.
+              </Text>
+              {cancelling.enforcementLevel !== 'none' && (
+                <Banner tone="success">Any active suspension or banner is lifted immediately — the site is restored.</Banner>
+              )}
+              <Text as="p" tone="subdued" variant="bodySm">
+                The site itself is not touched. Past invoices are kept as history. You can add billing to this
+                site again later.
+              </Text>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+      )}
     </BlockStack>
   )
 }

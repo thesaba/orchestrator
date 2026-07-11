@@ -264,8 +264,13 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
   }, async (request, reply) => {
     const b = request.body as Record<string, any>
 
+    // `siteId` is unique, so a site can hold only one subscription row. A
+    // *cancelled* one shouldn't block re-adding billing later — we reactivate
+    // it in place (keeping its id and invoice history) rather than 409-ing.
     const existing = await db.subscription.findUnique({ where: { siteId: b.siteId } })
-    if (existing) return reply.code(409).send({ error: 'This site already has a subscription.' })
+    if (existing && existing.status !== 'cancelled') {
+      return reply.code(409).send({ error: 'This site already has a subscription.' })
+    }
 
     const plan = b.planId ? await db.plan.findUnique({ where: { id: b.planId } }) : null
     const currency = b.currency ?? plan?.currency ?? 'GEL'
@@ -275,26 +280,38 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
 
     const start = b.startDate ? new Date(b.startDate) : new Date()
     const interval = b.interval ?? plan?.interval ?? 'monthly'
+    const data = {
+      clientId: b.clientId,
+      planId: b.planId ?? null,
+      amount,
+      currency,
+      interval,
+      intervalDays: b.intervalDays ?? plan?.intervalDays ?? null,
+      anchorDay: b.anchorDay ?? null,
+      startDate: start,
+      nextInvoiceAt: start,
+      gracePeriodDays: b.gracePeriodDays ?? plan?.gracePeriodDays ?? 3,
+      neverAutoSuspend: b.neverAutoSuspend ?? false,
+      dunningPolicy: b.dunningPolicy ? JSON.stringify(b.dunningPolicy) : ''
+    }
+
     // First invoice is due immediately at `start`; the anchor then repeats.
-    const sub = await db.subscription.create({
-      data: {
-        siteId: b.siteId,
-        clientId: b.clientId,
-        planId: b.planId ?? null,
-        amount,
-        currency,
-        interval,
-        intervalDays: b.intervalDays ?? plan?.intervalDays ?? null,
-        anchorDay: b.anchorDay ?? null,
-        startDate: start,
-        nextInvoiceAt: start,
-        gracePeriodDays: b.gracePeriodDays ?? plan?.gracePeriodDays ?? 3,
-        neverAutoSuspend: b.neverAutoSuspend ?? false,
-        dunningPolicy: b.dunningPolicy ? JSON.stringify(b.dunningPolicy) : ''
-      },
-      include: { site: true, client: true }
+    const sub = existing
+      ? await db.subscription.update({
+          where: { id: existing.id },
+          // Reactivate: fresh billing state, enforcement cleared, cancel undone.
+          data: { ...data, status: 'active', enforcementLevel: 'none', cancelledAt: null, suspendedAt: null },
+          include: { site: true, client: true }
+        })
+      : await db.subscription.create({
+          data: { siteId: b.siteId, ...data },
+          include: { site: true, client: true }
+        })
+
+    app.audit(existing ? 'billing.subscription_reactivated' : 'billing.subscription_created', {
+      req: request,
+      meta: { subscriptionId: sub.id, siteId: b.siteId }
     })
-    app.audit('billing.subscription_created', { req: request, meta: { subscriptionId: sub.id, siteId: b.siteId } })
     return reply.code(201).send(sub)
   })
 
