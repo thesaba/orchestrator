@@ -27,20 +27,33 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // Take control immediately on update instead of waiting for every tab
-        // to close. Without these, a new build's service worker sits in
-        // "waiting" while the old one keeps serving the precached index.html —
-        // so a normal Cmd+R shows the OLD app and only Cmd+Shift+R (which
-        // bypasses the SW) shows the new one. skipWaiting + clientsClaim make
-        // the fresh SW activate and control all open pages right away.
+        // Activate a new build's service worker immediately instead of leaving
+        // it "waiting" behind the old one.
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        navigateFallback: '/index.html',
+        // IMPORTANT: do NOT set navigateFallback. That option makes the SW serve
+        // the *precached* index.html for every navigation (cache-first), which
+        // is exactly why a normal Cmd+R kept showing an old build until a second
+        // refresh. Hashed JS/CSS are still precached (immutable, safe); only the
+        // HTML shell is handled below, network-first, so a reload is always the
+        // current build when online and falls back to the last cached shell only
+        // when offline.
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,
-            handler: 'NetworkOnly'  // always fresh for API calls
+            handler: 'NetworkOnly' // never cache API responses
+          },
+          {
+            // Page navigations (the HTML document) — always try the network
+            // first so a refresh shows the current build; cache is a fallback.
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'html-shell',
+              networkTimeoutSeconds: 4,
+              expiration: { maxEntries: 4 }
+            }
           }
         ]
       }
