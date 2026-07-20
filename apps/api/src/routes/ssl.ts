@@ -1,5 +1,6 @@
 import { FastifyPluginAsync } from 'fastify'
 import { EventEmitter } from 'events'
+import dns from 'dns'
 import { getCertInfo } from '../lib/ssl'
 import { spawnOn, execOn, isLocal } from '../lib/server-exec'
 import { serverCtxForSite } from '../lib/servers'
@@ -7,6 +8,30 @@ import { serverCtxForSite } from '../lib/servers'
 // One certbot process per site at a time
 const sslEmitters = new Map<number, EventEmitter>()
 const sslLogBuffers = new Map<number, string[]>()
+
+/**
+ * Does `www.<domain>` actually exist in DNS?
+ *
+ * The vhost lists `www.<domain>` in server_name so the www host lands on the
+ * right site, but the certificate must cover it too or browsers get a name
+ * mismatch. We only ask certbot for the www name when it really resolves —
+ * requesting a name with no DNS record makes certbot fail the WHOLE issuance,
+ * which would leave the site with no certificate at all.
+ */
+async function wwwResolves(domain: string): Promise<boolean> {
+  if (domain.startsWith('www.')) return false
+  const name = `www.${domain}`
+  try {
+    const a = await dns.promises.resolve4(name)
+    if (a.length) return true
+  } catch { /* fall through to CNAME */ }
+  try {
+    const c = await dns.promises.resolveCname(name)
+    return c.length > 0
+  } catch {
+    return false
+  }
+}
 
 export const sslRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
@@ -60,10 +85,17 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
     const buffer: string[] = []
     sslLogBuffers.set(siteId, buffer)
 
+    // Cover www.<domain> too when it resolves, so visiting the www host doesn't
+    // hit a certificate-name mismatch. --expand lets an existing certificate
+    // gain the extra name instead of erroring.
+    const domainArgs = ['-d', site.domain]
+    if (await wwwResolves(site.domain)) domainArgs.push('-d', `www.${site.domain}`)
+
     const ctx = await serverCtxForSite(app.prisma, site)
     const proc = await spawnOn(ctx, 'certbot', [
       '--nginx',
-      '-d', site.domain,
+      ...domainArgs,
+      '--expand',
       '--non-interactive',
       '--agree-tos',
       ...acctArgs,

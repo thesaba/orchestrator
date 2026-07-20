@@ -97,7 +97,10 @@ log "[3/4] Writing Nginx config ($TEMPLATE)..."
 server {
     listen 80;
     listen [::]:80;
-    server_name ${DOMAIN};
+    # The www. alias is included so a request for www.<domain> matches THIS site.
+    # Without it nginx finds no matching server_name and falls through to the
+    # default server — which is another customer's site.
+    server_name ${DOMAIN} www.${DOMAIN};
     root ${WEB_ROOT};
 
     add_header X-Frame-Options "SAMEORIGIN";

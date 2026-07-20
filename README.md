@@ -398,6 +398,8 @@ Located in `scripts/`, invoked by the API to act on the host:
 | `toggle-site.sh` | Enable/disable serving a site |
 | `backup.sh` | Cron-based MySQL dump backups (per site) |
 | `panel-backup.sh` | Back up the panel's **own** SQLite database (WAL-safe) |
+| `site-suspend.sh` | Apply a billing enforcement level to a live site (banner / restrict / suspend / archived) |
+| `nginx-catchall.sh` | Install a default server so an **unmatched hostname** gets a blank 404 instead of another customer's site (run once per server) |
 | `orchestrator-api.service` · `nginx-panel.conf` | systemd & nginx templates |
 | `orchestrator-backup.service` · `.timer` | Daily panel-DB backup via systemd |
 
