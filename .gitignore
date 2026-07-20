@@ -6,3 +6,4 @@ dist/
 prisma/migrations/
 DEPLOY_GUIDE.md
 .claude/settings.local.json
+.DS_Store
