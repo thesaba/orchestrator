@@ -125,7 +125,18 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
 
     const ctx = await serverCtxForSite(app.prisma, site)
-    const { content } = request.body as { content: string }
+    const raw = (request.body as { content: string }).content
+    // Normalise before saving. Vite's dotenv parser (unlike PHP's) chokes on
+    // trailing whitespace and CRLF line endings — a value with trailing spaces
+    // silently drops that var and every VITE_* var after it from the build,
+    // which surfaces much later as an empty client config (e.g. Reverb key).
+    // Strip CR, trailing whitespace per line, and any trailing blank lines,
+    // then guarantee a single terminating newline.
+    const content = raw
+      .replace(/\r\n?/g, '\n')       // CRLF / lone CR → LF
+      .replace(/[ \t]+$/gm, '')      // trailing spaces/tabs on every line
+      .replace(/\n{3,}/g, '\n\n')    // collapse runs of blank lines
+      .replace(/\n*$/, '') + '\n'    // exactly one trailing newline
     const envPath = `${site.rootPath}/shared/.env`
     const uid = (request.user as { userId?: number }).userId ?? null
 

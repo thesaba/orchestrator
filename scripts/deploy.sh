@@ -145,21 +145,26 @@ fi
 # ── 4. Front-end assets ──────────────────────────────────────────────────────
 if [ -f package.json ] && grep -q '"build"[[:space:]]*:' package.json; then
   log "[4/8] Installing JS dependencies and building front-end assets..."
+  # Build tools (vite, etc.) live in devDependencies. If the environment has
+  # NODE_ENV=production, every package manager omits devDependencies by default
+  # — the install "succeeds" but the build then fails with "vite: not found".
+  # Force dev deps in explicitly so the front-end build always has its tooling,
+  # regardless of the ambient NODE_ENV.
   if [ -f pnpm-lock.yaml ]; then
     command -v pnpm >/dev/null 2>&1 || npm install -g pnpm --silent
-    pnpm install --frozen-lockfile
+    pnpm install --frozen-lockfile --prod=false
     pnpm run build
   elif [ -f yarn.lock ]; then
     command -v yarn >/dev/null 2>&1 || npm install -g yarn --silent
-    yarn install --frozen-lockfile
+    yarn install --frozen-lockfile --production=false
     yarn build
   else
     # Try a strict install first; if peer-dependency conflicts prevent it
     # (e.g. mismatched tiptap/other monorepo packages), fall back to
     # --legacy-peer-deps so the deploy isn't blocked by upstream version skew.
-    if ! npm ci 2>&1; then
+    if ! npm ci --include=dev 2>&1; then
       log "[4/8] npm ci failed (peer dep conflict?) — retrying with --legacy-peer-deps"
-      npm ci --legacy-peer-deps
+      npm ci --include=dev --legacy-peer-deps
     fi
     npm run build
   fi
