@@ -193,18 +193,24 @@ php${PHP_VER} artisan migrate --force
 # aborts an otherwise-successful build (matching the previous behaviour).
 WEB_USER="www-data"
 log "[6b/8] Setting web-server ownership ($WEB_USER)..."
+# IMPORTANT: the release's `storage` is a SYMLINK to $SHARED_DIR/storage, and
+# `chown -R` does NOT follow symlinks — so chowning the release alone never
+# touches the shared storage tree. We target $SHARED_DIR/storage EXPLICITLY.
+# This also self-heals any file a manual `php artisan` run left root-owned
+# (e.g. storage/logs/laravel.log), which otherwise makes php-fpm unable to
+# write logs and throws "storage not writable" on the next request.
 if [ "$(id -u)" = "0" ]; then
-  chown -R "$WEB_USER:$WEB_USER" "$RELEASE_DIR" || log "  WARN: chown failed (continuing)"
+  chown -R "$WEB_USER:$WEB_USER" "$RELEASE_DIR" "$SHARED_DIR/storage" || log "  WARN: chown failed (continuing)"
 elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-  sudo chown -R "$WEB_USER:$WEB_USER" "$RELEASE_DIR" || log "  WARN: sudo chown failed (continuing)"
+  sudo chown -R "$WEB_USER:$WEB_USER" "$RELEASE_DIR" "$SHARED_DIR/storage" || log "  WARN: sudo chown failed (continuing)"
 else
   # Not root and no passwordless sudo — fall back to group access (works when the
   # deploy user belongs to the www-data group). Never fatal.
-  chgrp -R "$WEB_USER" bootstrap/cache storage 2>/dev/null || true
-  chmod -R g+rwX bootstrap/cache 2>/dev/null || true
+  chgrp -R "$WEB_USER" bootstrap/cache "$SHARED_DIR/storage" 2>/dev/null || true
+  chmod -R g+rwX bootstrap/cache "$SHARED_DIR/storage" 2>/dev/null || true
   log "  NOTE: not root and no passwordless sudo — applied group-based fallback."
   log "        If the worker still can't write bootstrap/cache, run once:"
-  log "        sudo chown -R $WEB_USER:$WEB_USER $RELEASE_DIR"
+  log "        sudo chown -R $WEB_USER:$WEB_USER $RELEASE_DIR $SHARED_DIR/storage"
 fi
 
 # ── 7. Atomic symlink swap ───────────────────────────────────────────────────
