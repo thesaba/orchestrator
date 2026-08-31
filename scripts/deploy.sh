@@ -218,6 +218,25 @@ log "[7/8] Activating release (symlink swap)..."
 ln -sfn "$RELEASE_DIR" "$SITE_DIR/current"
 log "  current -> $RELEASE_DIR"
 
+# ── 7b. Reset OPcache ─────────────────────────────────────────────────────────
+# OPcache keys compiled scripts by ABSOLUTE path and has no LRU eviction, so
+# each release (a new path) leaves its predecessor's scripts stranded in shared
+# memory forever — across several sites that silently fills the SHM segment,
+# after which nothing new gets cached and every request recompiles hot code
+# (a large, hard-to-spot latency regression). A graceful FPM reload flushes the
+# cache so the just-activated release compiles clean and stale entries are gone.
+# Reload does NOT drop in-flight connections. Note: OPcache SHM is shared by the
+# whole FPM master, so this briefly cold-starts every pool on this PHP version —
+# acceptable, as warm-up is a few seconds. Best-effort and never fatal.
+log "[7b/8] Resetting OPcache (graceful php-fpm reload)..."
+if [ "$(id -u)" = "0" ]; then
+  systemctl reload "php${PHP_VER}-fpm" || log "  WARN: php-fpm reload failed — OPcache not reset (continuing)"
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  sudo systemctl reload "php${PHP_VER}-fpm" || log "  WARN: sudo php-fpm reload failed — OPcache not reset (continuing)"
+else
+  log "  NOTE: no root/passwordless sudo — OPcache not reset; old-release entries may accumulate."
+fi
+
 # ── 8. Cleanup ───────────────────────────────────────────────────────────────
 log "[8/8] Restarting queues and cleaning old releases..."
 php${PHP_VER} artisan queue:restart
