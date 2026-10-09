@@ -111,9 +111,12 @@ export const databaseRoutes: FastifyPluginAsync = async (app) => {
     const filePath = path.join(backupsDir, filename)
 
     // MYSQL_PWD is read by mysqldump automatically — avoids the password in argv.
-    const userFlag = creds.user ? `-u "${creds.user}"` : ''
+    // creds.user/creds.db come from the site's shared/.env, which the site user
+    // can write via the file manager, so they are untrusted — shellEscape them
+    // (and filePath, which embeds creds.db) to prevent command injection.
+    const userFlag = creds.user ? `-u ${shellEscape(creds.user)}` : ''
     try {
-      await execOn(ctx, 'bash', ['-lc', `mysqldump ${userFlag} "${creds.db}" | gzip > "${filePath}"`],
+      await execOn(ctx, 'bash', ['-lc', `mysqldump ${userFlag} ${shellEscape(creds.db)} | gzip > ${shellEscape(filePath)}`],
         { env: creds.pass ? { MYSQL_PWD: creds.pass } : undefined } as any)
     } catch (err: unknown) {
       await unlinkOn(ctx, filePath)
@@ -178,8 +181,9 @@ export const databaseRoutes: FastifyPluginAsync = async (app) => {
       } else {
         // Remote: the dump already lives on the site's host — replay it there.
         const cat = filename.endsWith('.gz') ? 'zcat' : 'cat'
-        const userFlag = creds.user ? `-u "${creds.user}"` : ''
-        await execOn(ctx, 'bash', ['-lc', `${cat} "${filePath}" | mysql -h 127.0.0.1 ${userFlag} "${creds.db}"`],
+        // creds.user/creds.db are untrusted (.env is site-writable) — shellEscape.
+        const userFlag = creds.user ? `-u ${shellEscape(creds.user)}` : ''
+        await execOn(ctx, 'bash', ['-lc', `${cat} ${shellEscape(filePath)} | mysql -h 127.0.0.1 ${userFlag} ${shellEscape(creds.db)}`],
           { env: creds.pass ? { MYSQL_PWD: creds.pass } : undefined } as any)
       }
       app.audit('database.restored', { siteId: site.id, req: request, meta: { domain: site.domain, filename } })

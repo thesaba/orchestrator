@@ -32,7 +32,7 @@ export const uptimeRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // GET /uptime/:siteId/history — last 24h checks for charts
-  app.get('/uptime/:siteId/history', async (request, reply) => {
+  app.get('/uptime/:siteId/history', { preHandler: [app.requireSiteAccess()] }, async (request, reply) => {
     const siteId = Number((request.params as { siteId: string }).siteId)
     const since = new Date(Date.now() - 24 * 60 * 60_000)
 
@@ -49,7 +49,7 @@ export const uptimeRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // GET /uptime/:siteId/sparkline — last 20 response times for mini chart
-  app.get('/uptime/:siteId/sparkline', async (request) => {
+  app.get('/uptime/:siteId/sparkline', { preHandler: [app.requireSiteAccess()] }, async (request) => {
     const siteId = Number((request.params as { siteId: string }).siteId)
     const checks = await app.prisma.uptimeCheck.findMany({
       where: { siteId },
@@ -62,6 +62,7 @@ export const uptimeRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /uptime/:siteId — toggle monitoring on/off per site
   app.patch('/uptime/:siteId', {
+    preHandler: [app.requireSiteAccess()],
     schema: {
       body: {
         type: 'object',
@@ -73,6 +74,9 @@ export const uptimeRoutes: FastifyPluginAsync = async (app) => {
   }, async (request, reply) => {
     const siteId = Number((request.params as { siteId: string }).siteId)
     const { monitoring } = request.body as { monitoring: boolean }
+    // Guard existence so a bad id returns 404 instead of an unhandled P2025 500.
+    const exists = await app.prisma.site.findUnique({ where: { id: siteId }, select: { id: true } })
+    if (!exists) return reply.code(404).send({ error: 'Site not found' })
     await app.prisma.site.update({ where: { id: siteId }, data: { uptimeMonitor: monitoring } })
     return { ok: true, monitoring }
   })

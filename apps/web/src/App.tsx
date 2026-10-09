@@ -1,7 +1,7 @@
 import { AppProvider, Spinner } from '@shopify/polaris'
 import enTranslations from '@shopify/polaris/locales/en.json'
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom'
-import { ComponentProps, lazy, Suspense } from 'react'
+import { Component, ComponentProps, ErrorInfo, lazy, ReactNode, Suspense } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AppLayout } from './components/AppLayout'
 import { InstallPrompt } from './components/InstallPrompt'
@@ -36,6 +36,40 @@ function RouteFallback() {
       <Spinner accessibilityLabel="Loading page" size="large" />
     </div>
   )
+}
+
+// After a deploy, hashed chunk filenames change; an old tab that then navigates
+// to a not-yet-loaded route imports a chunk that no longer exists (ChunkLoadError).
+// With lazy routes and no boundary this white-screens the app. Catch it and
+// reload ONCE (guarded against a loop) to pull the fresh build.
+class ChunkErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError(err: unknown) {
+    const msg = (err as Error)?.message ?? ''
+    if (/loading chunk|dynamically imported module|importing a module script failed|ChunkLoadError/i.test(msg)) {
+      const KEY = 'chunk-reload-once'
+      if (!sessionStorage.getItem(KEY)) {
+        sessionStorage.setItem(KEY, '1')
+        window.location.reload()
+        return { failed: false }
+      }
+    }
+    return { failed: true }
+  }
+  componentDidCatch(_e: Error, _i: ErrorInfo) { /* state-driven */ }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div style={{ padding: 32, textAlign: 'center' }}>
+          <p>Something went wrong loading this page.</p>
+          <button onClick={() => { sessionStorage.removeItem('chunk-reload-once'); window.location.reload() }}>
+            Reload
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 function PolarisLink({ children, url, ...rest }: ComponentProps<'a'> & { url: string }) {
@@ -100,7 +134,9 @@ export default function App() {
     <AppProvider i18n={enTranslations} linkComponent={PolarisLink}>
       <AuthProvider>
         <BrowserRouter>
-          <AppRoutes />
+          <ChunkErrorBoundary>
+            <AppRoutes />
+          </ChunkErrorBoundary>
           <InstallPrompt />
         </BrowserRouter>
       </AuthProvider>

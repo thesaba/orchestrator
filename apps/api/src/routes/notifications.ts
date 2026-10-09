@@ -26,15 +26,15 @@ export const notificationsRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true }
   })
 
-  // DELETE /:id — remove one.
-  app.delete('/:id', async (request) => {
+  // DELETE /:id — remove one. (Global feed — destructive, so admin-only.)
+  app.delete('/:id', { preHandler: [app.requireRole(['admin'])] }, async (request) => {
     const id = Number((request.params as { id: string }).id)
     await app.prisma.notification.delete({ where: { id } }).catch(() => {})
     return { ok: true }
   })
 
-  // DELETE / — clear all.
-  app.delete('/', async () => {
+  // DELETE / — clear all. (Global feed — destructive, so admin-only.)
+  app.delete('/', { preHandler: [app.requireRole(['admin'])] }, async () => {
     await app.prisma.notification.deleteMany({})
     return { ok: true }
   })

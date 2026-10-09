@@ -331,6 +331,11 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
     const b = request.body as Record<string, any>
     const data: Record<string, unknown> = { ...b }
     delete data.id; delete data.siteId
+    // enforcementLevel/status/suspendedAt reflect the LIVE serving layer (nginx
+    // 503, worker state). Changing them via a raw PATCH diverges the DB from
+    // what nginx actually serves (a banner with no suspension, or vice-versa);
+    // they must only move through applyEnforcement.
+    delete data.enforcementLevel; delete data.status; delete data.suspendedAt; delete data.lastEnforcedAt
     if (typeof b.amount === 'string') {
       const parsed = parseMoney(b.amount, b.currency)
       if (parsed !== null) data.amount = parsed
@@ -559,6 +564,12 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
     if (!invoice) return reply.code(404).send({ error: 'Invoice not found' })
     if (invoice.status === 'paid') return reply.code(400).send({ error: 'A paid invoice cannot be voided.' })
     if (invoice.status === 'void') return { voided: true }
+    // A partially-paid invoice has real Payment rows attached. Voiding it (and
+    // rolling the period back so it's re-billed in full) would orphan that money
+    // and could double-charge the client — refund/reallocate first.
+    if ((invoice.amountPaid ?? 0) > 0) {
+      return reply.code(400).send({ error: 'This invoice has recorded payments — refund or reallocate them before voiding.' })
+    }
 
     await db.invoice.update({ where: { id }, data: { status: 'void' } })
 

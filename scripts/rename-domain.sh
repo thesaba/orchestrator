@@ -43,6 +43,21 @@ log "[1/2] Moving site directory..."
 mv "$OLD_DIR" "$NEW_DIR"
 log "  $OLD_DIR -> $NEW_DIR"
 
+# deploy.sh writes `current` as an ABSOLUTE symlink into
+# /var/www/sites/<OLD>/releases/... — after the mv that target no longer exists,
+# so the site would serve 404/403 through a dangling link (nginx -t does NOT
+# catch a missing root). Re-point `current` at the moved release.
+if [ -L "$NEW_DIR/current" ]; then
+  _tgt="$(readlink "$NEW_DIR/current")"
+  _rel="$(basename "$_tgt")"
+  if [ -d "$NEW_DIR/releases/$_rel" ]; then
+    ln -sfn "$NEW_DIR/releases/$_rel" "$NEW_DIR/current"
+    log "  Re-pointed current -> $NEW_DIR/releases/$_rel"
+  else
+    log "  WARNING: could not resolve moved release ($_tgt) — check the current symlink"
+  fi
+fi
+
 if [ -f "$OLD_CONF" ]; then
   log "[2/2] Rewriting Nginx config..."
   sed -e "s|server_name ${OLD};|server_name ${NEW};|g" \

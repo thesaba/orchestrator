@@ -226,7 +226,13 @@ export async function runBillingTick(
       }
 
       // 2c. Enforcement — only when the target differs from what's applied.
-      if (ladder.targetLevel !== sub.enforcementLevel) {
+      // A dry run MUST never touch the serving layer: applyEnforcement re-reads
+      // the GLOBAL master switch, so when that switch is `on` a preview would
+      // otherwise perform a REAL suspension. Guard it here, exactly like 2a does
+      // for restore.
+      if (ladder.targetLevel !== sub.enforcementLevel && !commit) {
+        report.escalated.push(`${sub.site.domain}: would enforce (${sub.enforcementLevel} → ${ladder.targetLevel})`)
+      } else if (ladder.targetLevel !== sub.enforcementLevel) {
         const r = await applyEnforcement(
           app,
           {

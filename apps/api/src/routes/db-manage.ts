@@ -93,6 +93,11 @@ function validateSql(sql: string): { valid: true } | { valid: false; reason: str
   const statements = stripped.split(';').map((s) => s.trim()).filter(Boolean)
 
   for (const stmt of statements) {
+    // Even a SELECT can WRITE files via INTO OUTFILE/DUMPFILE when the MySQL user
+    // holds the FILE privilege — reject it explicitly (defense in depth).
+    if (/\binto\s+(?:out|dump)file\b/i.test(stmt)) {
+      return { valid: false, reason: 'SELECT … INTO OUTFILE/DUMPFILE is not permitted.' }
+    }
     if (BLOCKED_STATEMENT_RE.test(stmt)) {
       const type = stmt.split(/\s/)[0].toUpperCase()
       return { valid: false, reason: `${type} statements are not permitted. Only SELECT, INSERT, UPDATE, DELETE, EXPLAIN, SHOW, DESCRIBE are allowed.` }

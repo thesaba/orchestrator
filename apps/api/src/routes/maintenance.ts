@@ -28,6 +28,14 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
     if (site.status !== 'active') return reply.code(400).send({ error: 'Site is not active' })
 
+    // The secret is interpolated into a bash -lc string (only `"` was escaped,
+    // leaving `$`/backtick open to command substitution). A Laravel maintenance
+    // secret is used as a URL path segment, so constrain it to URL-safe chars —
+    // this both matches its real use and removes every shell metacharacter.
+    if (secret && !/^[A-Za-z0-9_-]{1,128}$/.test(secret)) {
+      return reply.code(400).send({ error: 'Secret may only contain letters, numbers, hyphen and underscore' })
+    }
+
     const artisan = path.join(site.rootPath, 'current', 'artisan')
     const php = `php${site.phpVersion}`
 

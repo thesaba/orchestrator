@@ -179,11 +179,12 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
 
   // ── GET /system ─────────────────────────────────────────────────────────
-  app.get('/system', async () => getSystemStats())
+  app.get('/system', { preHandler: [app.requireRole(['admin'])] }, async () => getSystemStats())
 
   // ── GET /history?hours=24 ────────────────────────────────────────────────
   // Historical CPU/RAM/disk samples captured by the metrics monitor.
   app.get('/history', {
+    preHandler: [app.requireRole(['admin'])],
     schema: {
       querystring: {
         type: 'object',
@@ -207,6 +208,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
 
   // ── GET /processes — top resource-consuming services (grouped by command) ──
   app.get('/processes', {
+    preHandler: [app.requireRole(['admin'])],
     schema: {
       querystring: {
         type: 'object',
@@ -223,6 +225,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   // Derived from the uptime checks already collected (synthetic monitoring), so
   // it's read-only and adds no load to the sites themselves.
   app.get('/apm', {
+    preHandler: [app.requireRole(['admin'])],
     schema: {
       querystring: {
         type: 'object',
@@ -266,7 +269,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── GET /services ────────────────────────────────────────────────────────
-  app.get('/services', async () => {
+  app.get('/services', { preHandler: [app.requireRole(['admin'])] }, async () => {
     return Promise.all(
       SERVICE_CANDIDATES.map(async (svc) => {
         for (const name of svc.names) {
@@ -282,6 +285,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
 
   // ── POST /services/:key/control ──────────────────────────────────────────
   app.post('/services/:key/control', {
+    preHandler: [app.requireRole(['admin'])],
     schema: {
       body: {
         type: 'object',
@@ -318,7 +322,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── GET /services/:key/logs — SSE journalctl tail ────────────────────────
-  app.get('/services/:key/logs', async (request, reply) => {
+  app.get('/services/:key/logs', { preHandler: [app.requireRole(['admin'])] }, async (request, reply) => {
     const { key } = request.params as { key: string }
 
     const svc = SERVICE_CANDIDATES.find((s) => s.key === key)
@@ -357,6 +361,15 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
         clearInterval(ka)
         resolve()
       })
+      // Missing binary (e.g. no journalctl on a non-systemd host) makes the
+      // child emit 'error'; with no listener Node throws and crashes the whole
+      // API process. Handle it: report, clean up, resolve.
+      child.on('error', (err: Error) => {
+        clearInterval(ka)
+        send({ error: err.message, done: true })
+        if (!socket.destroyed) socket.end()
+        resolve()
+      })
       child.on('exit', () => {
         clearInterval(ka)
         send({ done: true })
@@ -367,7 +380,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── GET /stats/history — last 7 days deploy counts for charts ───────────
-  app.get('/stats/history', async () => {
+  app.get('/stats/history', { preHandler: [app.requireRole(['admin'])] }, async () => {
     const days: { date: string; success: number; failed: number }[] = []
     for (let i = 6; i >= 0; i--) {
       const d = new Date()
@@ -386,7 +399,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── GET /ssl — SSL expiry for all active sites ───────────────────────────
-  app.get('/ssl', async () => {
+  app.get('/ssl', { preHandler: [app.requireRole(['admin'])] }, async () => {
     const sites = await app.prisma.site.findMany({
       where: { status: 'active', sslEnabled: true },
       select: { id: true, domain: true }
@@ -435,7 +448,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── GET /health-score/:siteId ─────────────────────────────────────────────
-  app.get('/health-score/:siteId', async (request) => {
+  app.get('/health-score/:siteId', { preHandler: [app.requireSiteAccess()] }, async (request) => {
     const siteId = Number((request.params as { siteId: string }).siteId)
     const site = await app.prisma.site.findUnique({
       where: { id: siteId },
@@ -497,7 +510,7 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── GET /logs/:siteId/stream — SSE tail of Laravel log ──────────────────
-  app.get('/logs/:siteId/stream', async (request, reply) => {
+  app.get('/logs/:siteId/stream', { preHandler: [app.requireSiteAccess()] }, async (request, reply) => {
     const { siteId } = request.params as { siteId: string }
 
     const site = await app.prisma.site.findUnique({ where: { id: Number(siteId) } })
@@ -539,6 +552,15 @@ export const monitorRoutes: FastifyPluginAsync = async (app) => {
         resolve()
       })
 
+      // A failed local spawn (missing `tail`) emits 'error'; without a listener
+      // Node throws and crashes the API. (spawnOn's remote branch handles this;
+      // the local branch does not.) Report, clean up, resolve.
+      proc.on('error', (err: Error) => {
+        clearInterval(ka)
+        send({ error: err.message, done: true })
+        if (!reply.raw.destroyed) reply.raw.end()
+        resolve()
+      })
       proc.on('exit', () => {
         clearInterval(ka)
         send({ done: true })

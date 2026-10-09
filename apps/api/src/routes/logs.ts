@@ -1,9 +1,20 @@
 import { FastifyPluginAsync } from 'fastify'
 import path from 'path'
 import { serverCtxForSite } from '../lib/servers'
-import { readFileOn, writeFileOn } from '../lib/server-fs'
+import { writeFileOn } from '../lib/server-fs'
+import { execOn } from '../lib/server-exec'
+import { shellEscape } from '../lib/ssh'
 
 const LOG_LEVELS = ['emergency','alert','critical','error','warning','notice','info','debug']
+
+// Cap how much of the log we read into memory — a Laravel log can be hundreds
+// of MB and reading it whole into a Buffer can OOM the API. ~2MB of tail is
+// plenty of recent entries for the viewer.
+const MAX_TAIL_BYTES = 2_000_000
+async function tailBytes(ctx: Awaited<ReturnType<typeof serverCtxForSite>>, p: string): Promise<string> {
+  const { stdout } = await execOn(ctx, 'bash', ['-lc', `tail -c ${MAX_TAIL_BYTES} ${shellEscape(p)}`])
+  return stdout
+}
 
 export const logsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
@@ -27,10 +38,10 @@ export const logsRoutes: FastifyPluginAsync = async (app) => {
     let content = ''
     let usedPath = logPath
     try {
-      content = await readFileOn(ctx, logPath)
+      content = await tailBytes(ctx, logPath)
     } catch {
       try {
-        content = await readFileOn(ctx, altLogPath)
+        content = await tailBytes(ctx, altLogPath)
         usedPath = altLogPath
       } catch {
         return { entries: [], total: 0, path: logPath }

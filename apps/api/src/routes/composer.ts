@@ -57,6 +57,15 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
 
     const ctx = await serverCtxForSite(app.prisma, site)
     const { package: pkg } = (request.body ?? {}) as { package?: string }
+
+    // The package name is interpolated into a bash -lc string; validate it to a
+    // strict Composer spec (vendor/name[:constraint]) so no shell metacharacter
+    // ($, backtick, ", \, ;, |, spaces) can ever reach the shell. Rejecting the
+    // whole shape is simpler and safer than escaping.
+    if (pkg && !/^[a-z0-9]([a-z0-9._-]*)\/[a-z0-9]([a-z0-9._-]*)(:[A-Za-z0-9._^~*<>=. -]+)?$/.test(pkg)) {
+      return reply.code(400).send({ error: 'Invalid composer package name' })
+    }
+
     const cwd = path.join(site.rootPath, 'current')
     const php = `php${site.phpVersion}`
 

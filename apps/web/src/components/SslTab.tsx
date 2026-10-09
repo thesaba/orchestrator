@@ -74,7 +74,13 @@ export function SslTab({ siteId }: Props) {
         }
       },
       abort.signal
-    )
+    ).catch((e: unknown) => {
+      // Without this, a stream that fails to connect / errors mid-run leaves the
+      // button stuck in `loading` forever with no feedback. Ignore user aborts.
+      if ((e as Error)?.name === 'AbortError') return
+      setError((e as Error).message || 'SSL stream failed')
+      setOp(null)
+    })
   }
 
   const cancelStream = () => {

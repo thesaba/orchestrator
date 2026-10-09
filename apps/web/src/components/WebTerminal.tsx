@@ -13,6 +13,7 @@ export function WebTerminal({ siteId }: Props) {
   const xtermRef    = useRef<XTerm | null>(null)
   const wsRef       = useRef<WebSocket | null>(null)
   const fitRef      = useRef<FitAddon | null>(null)
+  const roRef       = useRef<ResizeObserver | null>(null)
   const [connected, setConnected] = useState(false)
   const [error,     setError]     = useState<string | null>(null)
 
@@ -72,10 +73,16 @@ export function WebTerminal({ siteId }: Props) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
     })
+    roRef.current = ro
     if (containerRef.current) ro.observe(containerRef.current)
   }
 
   function disconnect() {
+    // Disconnect the observer first — otherwise it keeps firing fit.fit() on a
+    // disposed terminal (throws) and leaks the xterm instance; reconnecting
+    // would stack a second observer each time.
+    roRef.current?.disconnect()
+    roRef.current = null
     wsRef.current?.close()
     xtermRef.current?.dispose()
     xtermRef.current = null

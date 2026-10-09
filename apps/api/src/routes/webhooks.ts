@@ -13,6 +13,11 @@ interface GitHubPushPayload {
   }
 }
 
+// Short-TTL dedup of GitHub delivery IDs: without it, a captured valid push can
+// be replayed to force repeated deploys (which re-run migrations / cause load).
+const seenDeliveries = new Map<string, number>()
+const DELIVERY_TTL_MS = 10 * 60 * 1000
+
 export const webhookRoutes: FastifyPluginAsync = async (app) => {
   // Parse JSON as raw Buffer so we can verify HMAC on exact bytes received.
   // Fastify's plugin scope keeps this parser isolated from other routes.
@@ -50,6 +55,17 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     const expBuf = Buffer.from(expected)
     const valid = signature.length === expected.length && crypto.timingSafeEqual(sigBuf, expBuf)
     if (!valid) return reply.code(401).send({ error: 'Invalid signature' })
+
+    // Replay protection: ignore a delivery ID we've already processed recently.
+    const deliveryId = (request.headers['x-github-delivery'] as string) ?? ''
+    if (deliveryId) {
+      const now = Date.now()
+      for (const [id, ts] of seenDeliveries) if (now - ts > DELIVERY_TTL_MS) seenDeliveries.delete(id)
+      if (seenDeliveries.has(deliveryId)) {
+        return { skipped: true, reason: 'Duplicate delivery (replay ignored)' }
+      }
+      seenDeliveries.set(deliveryId, now)
+    }
 
     const payload = request.body as GitHubPushPayload
     const pushedBranch = payload.ref.replace('refs/heads/', '')

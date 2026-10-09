@@ -60,7 +60,7 @@ export const terminalRoutes: FastifyPluginAsync = async (app) => {
     // same per-site authorization here. A full host shell is the highest-
     // privilege surface in the panel; it must never be reachable for a
     // site the caller wasn't explicitly (or blanket-) granted.
-    const role = payload.role ?? 'admin'
+    const role = payload.role ?? 'viewer' // fail closed on a missing role
     if (role !== 'admin' && payload.userId) {
       const dbUser = await app.prisma.user.findUnique({
         where: { id: payload.userId },

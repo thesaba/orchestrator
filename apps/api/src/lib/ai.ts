@@ -45,6 +45,12 @@ export function redact(input: string): string {
   s = s.replace(/(\/\/[^\s:@/]+):([^\s@/]+)@/g, '$1:«REDACTED»@')
   // AWS access key IDs.
   s = s.replace(/\bAKIA[0-9A-Z]{16}\b/g, '«REDACTED»')
+  // Bare high-entropy credential shapes that carry no key-name context (so the
+  // KEY=… / "token": … rules above miss them).
+  s = s.replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, '«REDACTED»')                    // OpenAI-style keys
+  s = s.replace(/\b[a-z]{2,}_(?:live|test)_[A-Za-z0-9]{16,}\b/g, '«REDACTED»') // Stripe-style sk_live_/sk_test_
+  s = s.replace(/\bgh[pousr]_[A-Za-z0-9]{30,}\b/g, '«REDACTED»')              // GitHub tokens
+  s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '«REDACTED JWT»') // JWTs
   // Mask email local parts.
   s = s.replace(/\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g, '$1***@$2')
   return s
@@ -64,9 +70,12 @@ export async function todayUsage(app: FastifyInstance): Promise<number> {
   return row?.count ?? 0
 }
 
-async function bumpUsage(app: FastifyInstance): Promise<void> {
+async function bumpUsage(app: FastifyInstance): Promise<number> {
   const d = today()
-  await app.prisma.aiUsage.upsert({ where: { date: d }, create: { date: d, count: 1 }, update: { count: { increment: 1 } } }).catch(() => {})
+  const row = await app.prisma.aiUsage
+    .upsert({ where: { date: d }, create: { date: d, count: 1 }, update: { count: { increment: 1 } } })
+    .catch(() => null)
+  return row?.count ?? 0
 }
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
@@ -78,7 +87,10 @@ export async function aiComplete(app: FastifyInstance, opts: { system: string; u
   if (!cfg.apiKey) throw Object.assign(new Error('No AI API key configured.'), { code: 400 })
 
   const limit = Number((await getSetting(app, 'ai_daily_limit')) || '0')
-  if (limit > 0 && (await todayUsage(app)) >= limit) {
+  // Atomic: increment first, then check the returned count. Reading-then-checking
+  // let concurrent requests all pass before any increment and overshoot the cap.
+  const usedNow = await bumpUsage(app)
+  if (limit > 0 && usedNow > limit) {
     throw Object.assign(new Error(`Daily AI request limit reached (${limit}). Raise it in Settings → Integrations.`), { code: 429 })
   }
 
@@ -114,7 +126,6 @@ export async function aiComplete(app: FastifyInstance, opts: { system: string; u
       if (!res.ok) throw new Error(data?.error?.message ?? `AI request failed (${res.status})`)
       text = (data?.choices?.[0]?.message?.content ?? '').trim()
     }
-    await bumpUsage(app)
     return text || 'No response.'
   } finally {
     clearTimeout(timer)

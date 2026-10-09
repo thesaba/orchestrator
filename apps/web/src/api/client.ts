@@ -15,8 +15,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   })
 
   if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY)
-    window.location.href = '/login'
+    // A failed login (wrong password / TOTP) also returns 401. Don't hijack it
+    // with a full-page redirect to /login — that wipes the form's error banner
+    // and loses the TOTP step. Let the caller surface those; only redirect for
+    // 401s on other (session-expired) requests.
+    const isLoginRequest = path.startsWith('/auth/login')
+    if (!isLoginRequest && window.location.pathname !== '/login') {
+      localStorage.removeItem(TOKEN_KEY)
+      window.location.href = '/login'
+    }
   }
 
   if (!res.ok) {

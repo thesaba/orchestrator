@@ -60,7 +60,17 @@ export async function issueInvoiceForSubscription(
   const dup = await prisma.invoice.findFirst({
     where: { subscriptionId: sub.id, periodStart, status: { not: 'void' } }
   })
-  if (dup) return { id: dup.id, number: dup.number, amount: dup.amount, currency: dup.currency, dueDate: dup.dueDate }
+  if (dup) {
+    // Advance the anchor PAST this already-billed period before returning.
+    // Otherwise, after a void rolls nextInvoiceAt back to an older period that
+    // still has a live later invoice, the tick re-issues the rolled-back period,
+    // advances, hits this dup, and sticks here forever — every subsequent period
+    // goes unbilled (lost revenue).
+    if (sub.nextInvoiceAt <= dup.periodEnd) {
+      await prisma.subscription.update({ where: { id: sub.id }, data: { nextInvoiceAt: dup.periodEnd } })
+    }
+    return { id: dup.id, number: dup.number, amount: dup.amount, currency: dup.currency, dueDate: dup.dueDate }
+  }
 
   const number = await nextInvoiceNumber(prisma, now)
   const invoice = await prisma.invoice.create({

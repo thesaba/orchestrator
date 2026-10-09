@@ -50,26 +50,37 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
     const { content } = request.body as { content: string }
     const configPath = `/etc/nginx/sites-available/${site.domain}`
     const backupPath = `${configPath}.bak`
+    const enabledPath = `/etc/nginx/sites-enabled/${site.domain}`
 
-    // Backup existing file
-    try { await copyFileOn(ctx, configPath, backupPath) } catch { /* first save */ }
+    // Back up the existing config, remembering whether one actually existed —
+    // this decides how we roll back a failed test.
+    let hadBackup = false
+    try { await copyFileOn(ctx, configPath, backupPath); hadBackup = true } catch { /* first save */ }
 
     // Write new config
     await writeFileOn(ctx, configPath, content)
 
-    // Ensure symlink
+    // Ensure the symlink so `nginx -t` actually includes THIS config.
     try {
-      await execOn(ctx, 'bash', ['-lc', `ln -sf ${configPath} /etc/nginx/sites-enabled/${site.domain}`])
+      await execOn(ctx, 'bash', ['-lc', `ln -sf ${configPath} ${enabledPath}`])
     } catch { /* ignore if already linked */ }
 
-    // Test — if it fails, restore and return error
+    // Test — on failure, roll back fully. A broken but ENABLED vhost makes the
+    // GLOBAL `nginx -t` fail, which then breaks every later reload (provision,
+    // SSL, another site's save) for ALL sites — so we must never leave one.
     try {
       await execOn(ctx, 'bash', ['-lc', 'nginx -t 2>&1'])
     } catch (err: unknown) {
-      try { await copyFileOn(ctx, backupPath, configPath) } catch { /* nothing */ }
+      if (hadBackup) {
+        try { await copyFileOn(ctx, backupPath, configPath) } catch { /* nothing */ }
+      } else {
+        // First save, no prior config: remove the just-written file AND the new
+        // symlink so nothing broken remains enabled.
+        try { await execOn(ctx, 'bash', ['-lc', `rm -f ${enabledPath} ${configPath}`]) } catch { /* nothing */ }
+      }
       const msg = (err as { stderr?: string; stdout?: string; message?: string })
       return reply.code(400).send({
-        error: 'Nginx config test failed — previous config restored.',
+        error: 'Nginx config test failed — reverted.',
         details: msg.stderr ?? msg.stdout ?? msg.message ?? ''
       })
     }
@@ -296,7 +307,15 @@ export const configRoutes: FastifyPluginAsync = async (app) => {
       })
     }
 
-    await execOn(ctx, 'bash', ['-lc', 'systemctl reload nginx'])
+    try {
+      await execOn(ctx, 'bash', ['-lc', 'systemctl reload nginx'])
+    } catch (err: unknown) {
+      // Reload failed after the vhost was rewritten — restore the backup so disk
+      // stays consistent with the DB (which we don't update below).
+      try { await copyFileOn(ctx, backupPath, configPath) } catch { /* nothing */ }
+      const msg = err as { stderr?: string; message?: string }
+      return reply.code(500).send({ error: 'Nginx reload failed — reverted.', details: msg.stderr ?? msg.message ?? '' })
+    }
     await app.prisma.site.update({ where: { id: siteId }, data: { phpVersion: version } })
     app.audit('php.switched', { siteId, meta: { domain: site.domain, from: site.phpVersion, to: version } })
 

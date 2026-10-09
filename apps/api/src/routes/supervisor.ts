@@ -45,7 +45,13 @@ export const supervisorRoutes: FastifyPluginAsync = async (app) => {
     }
   })
 
+  // Admin-only: the body is arbitrary supervisor config written to
+  // /etc/supervisor/conf.d and run as root (`command=`, `user=root`), i.e. code
+  // execution as a privileged user — a larger capability than editing one's own
+  // site files. (control/cron below write server-generated fixed templates only,
+  // so they stay at site-access.)
   app.put('/:id/supervisor', {
+    preHandler: [app.requireRole(['admin'])],
     schema: {
       body: {
         type: 'object',

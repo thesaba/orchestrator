@@ -3,6 +3,8 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { readSecret } from '../lib/crypto'
+import { spawnOn, isLocal } from '../lib/server-exec'
+import { serverCtxForSite } from '../lib/servers'
 
 function getS3Client(settings: Record<string, string>): S3Client {
   const endpoint = settings.s3_endpoint
@@ -45,9 +47,24 @@ export const s3BackupRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'S3/R2 credentials not configured. Set them in Settings → S3 Backup.' })
     }
 
+    const ctx = await serverCtxForSite(app.prisma, site)
     const localPath = path.join(site.rootPath, 'backups', filename)
     try {
-      const body = await fs.readFile(localPath)
+      // The backup lives on the SITE'S server. For remote sites that's not the
+      // panel host, so read it there (binary-safe stream over SSH) rather than
+      // from local disk — which would 500 for every remote-server site.
+      let body: Buffer
+      if (isLocal(ctx)) {
+        body = await fs.readFile(localPath)
+      } else {
+        const child = await spawnOn(ctx, 'cat', [localPath])
+        const chunks: Buffer[] = []
+        body = await new Promise<Buffer>((resolve, reject) => {
+          child.stdout.on('data', (c: Buffer) => chunks.push(Buffer.from(c)))
+          child.on('error', reject)
+          child.on('close', (code: number) => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error('Backup not found on remote host')))
+        })
+      }
       const client = getS3Client(s3Settings)
       const key = `backups/${site.domain}/${filename}`
 
@@ -104,6 +121,15 @@ export const s3BackupRoutes: FastifyPluginAsync = async (app) => {
 
     const site = await app.prisma.site.findUnique({ where: { id: Number(siteId) } })
     if (!site) return reply.code(404).send({ error: 'Site not found' })
+
+    // The key comes straight from the `*` wildcard. Without scoping it to THIS
+    // site's prefix, a user with access to one site could delete any object in
+    // the shared bucket — including other tenants' backups. Upload/list are
+    // already scoped to `backups/<domain>/`; the delete must match.
+    const prefix = `backups/${site.domain}/`
+    if (!key || !key.startsWith(prefix) || key.includes('..')) {
+      return reply.code(403).send({ error: 'Key is outside this site\'s backup prefix' })
+    }
 
     const s3Settings = await getS3Settings(app.prisma)
     if (!s3Settings.s3_access_key || !s3Settings.s3_bucket) {

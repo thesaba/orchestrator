@@ -4,6 +4,10 @@ import speakeasy from 'speakeasy'
 import QRCode from 'qrcode'
 import { readSecret, writeSecret } from '../lib/crypto'
 
+// A fixed valid bcrypt hash to compare against when an account doesn't exist, so
+// login response time can't distinguish "no such user" from "wrong password".
+const DUMMY_HASH = bcrypt.hashSync('invalid-account-placeholder', 12)
+
 export const authRoutes: FastifyPluginAsync = async (app) => {
   // ── Login ───────────────────────────────────────────────────────────────────
   app.post('/login', {
@@ -26,10 +30,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const user = await app.prisma.user.findUnique({ where: { email } })
-    if (!user) return reply.code(401).send({ error: 'Invalid credentials' })
-
-    const valid = await bcrypt.compare(password, user.password)
-    if (!valid) return reply.code(401).send({ error: 'Invalid credentials' })
+    // Always run a bcrypt compare (dummy hash when the user is absent) so the
+    // response time doesn't reveal whether the email has an account.
+    const valid = await bcrypt.compare(password, user?.password ?? DUMMY_HASH)
+    if (!user || !valid) return reply.code(401).send({ error: 'Invalid credentials' })
 
     // If 2FA enabled and code not provided yet, signal the frontend to ask for it
     if (user.totpEnabled && user.totpSecret) {
@@ -70,8 +74,18 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   // ── 2FA Setup ───────────────────────────────────────────────────────────────
 
   // GET /2fa/setup — generate a new TOTP secret + QR code (don't enable yet)
-  app.get('/2fa/setup', { preHandler: [app.authenticate] }, async (request) => {
+  app.get('/2fa/setup', { preHandler: [app.authenticate] }, async (request, reply) => {
     const payload = request.user as { userId: number; email: string }
+
+    // Refuse to overwrite a LIVE secret: login verifies against totpSecret, so
+    // regenerating it while 2FA is enabled would instantly invalidate the user's
+    // current authenticator and could lock them out. Require disabling first.
+    const existing = await app.prisma.user.findUnique({
+      where: { id: payload.userId }, select: { totpEnabled: true }
+    })
+    if (existing?.totpEnabled) {
+      return reply.code(400).send({ error: '2FA is already enabled — disable it first to set up a new device.' })
+    }
 
     const secret = speakeasy.generateSecret({
       name: `Orchestrator (${payload.email})`,

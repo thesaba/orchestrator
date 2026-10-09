@@ -39,13 +39,16 @@ const ALLOWED_KEYS = new Set([
 
 // These keys have their values redacted (write-only) in GET responses
 const REDACTED_KEYS = new Set([
-  's3_secret_key', 'mysql_root_password', 'do_api_token', 'deploy_telegram_bot_token', 'cloudflare_api_token'
+  's3_secret_key', 'mysql_root_password', 'do_api_token', 'deploy_telegram_bot_token', 'cloudflare_api_token',
+  // Webhook URLs embed bearer secrets, and the S3 access key is a credential —
+  // keep them write-only in GET responses (shown as ••• once set).
+  'deploy_slack_webhook', 'deploy_discord_webhook', 'deploy_generic_webhook', 's3_access_key'
 ])
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.authenticate)
 
-  app.get('/', async () => {
+  app.get('/', { preHandler: [app.requireRole(['admin'])] }, async () => {
     const rows = await app.prisma.setting.findMany({
       where: { key: { in: [...ALLOWED_KEYS] } }
     })

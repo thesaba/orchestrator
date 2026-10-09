@@ -24,7 +24,10 @@ export async function checkSiteUptime(domain: string): Promise<CheckResult> {
 }
 
 export function startUptimeMonitor(prisma: any, intervalMs = 5 * 60_000) {
+  let running = false
   const run = async () => {
+    if (running) return // a previous run is still going (many slow/down sites) — skip this tick
+    running = true
     try {
       const sites = await prisma.site.findMany({
         where: { status: 'active', uptimeMonitor: true },
@@ -50,7 +53,7 @@ export function startUptimeMonitor(prisma: any, intervalMs = 5 * 60_000) {
           }
         } catch { /* skip individual site errors */ }
       }
-    } catch { /* skip run errors */ }
+    } catch { /* skip run errors */ } finally { running = false }
   }
 
   run() // immediate first run

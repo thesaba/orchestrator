@@ -84,7 +84,11 @@ php_admin_flag[log_errors] = on
   })
 
   // PUT /:id/phpfpm
+  // Admin-only: the body is an arbitrary PHP-FPM pool config (php_admin_value,
+  // user/group, etc.) that php-fpm executes — effectively code/privilege control
+  // beyond editing one's own site files.
   app.put('/:id/phpfpm', {
+    preHandler: [app.requireRole(['admin'])],
     schema: {
       body: {
         type: 'object',

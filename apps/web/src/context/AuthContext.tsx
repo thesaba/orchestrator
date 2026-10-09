@@ -31,7 +31,7 @@ async function fetchMe(token: string): Promise<UserProfile | null> {
     return {
       id: data.id,
       email: data.email,
-      role: (data.role ?? 'admin') as UserProfile['role'],
+      role: (data.role ?? 'viewer') as UserProfile['role'], // fail closed, not admin
       totpEnabled: data.totpEnabled ?? false
     }
   } catch {

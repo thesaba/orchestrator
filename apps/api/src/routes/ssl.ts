@@ -189,7 +189,9 @@ export const sslRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const ctx = await serverCtxForSite(app.prisma, site)
-      await execOn(ctx, 'bash', ['-lc', `certbot delete --cert-name "${site.domain}" --non-interactive 2>&1 || true`])
+      // argv (no shell) — consistent with the rest of the file; the enclosing
+      // try/catch already tolerates a non-zero exit (e.g. cert already gone).
+      await execOn(ctx, 'certbot', ['delete', '--cert-name', site.domain, '--non-interactive'])
     } catch { /* best-effort */ }
 
     await app.prisma.site.update({ where: { id: siteId }, data: { sslEnabled: false } })

@@ -76,10 +76,28 @@ export const artisanRoutes: FastifyPluginAsync = async (app) => {
     const phpBin = `php${site.phpVersion}`
 
     const ctx = await serverCtxForSite(app.prisma, site)
-    const child = await spawnOn(ctx, phpBin, [artisanPath, command, '--no-interaction', '--ansi'], {
-      cwd: `${site.rootPath}/current`,
-      env: { TERM: 'xterm-256color' },
-      tty: !isLocal(ctx)
+    let child: Awaited<ReturnType<typeof spawnOn>>
+    try {
+      child = await spawnOn(ctx, phpBin, [artisanPath, command, '--no-interaction', '--ansi'], {
+        cwd: `${site.rootPath}/current`,
+        env: { TERM: 'xterm-256color' },
+        tty: !isLocal(ctx)
+      })
+    } catch (err) {
+      // Spawn failed — release the lock so the artisan panel isn't wedged at 409
+      // "already running" until the API restarts.
+      artisanEmitters.delete(siteId)
+      artisanBuffers.delete(siteId)
+      return reply.code(500).send({ error: (err as Error).message })
+    }
+
+    // A local spawn that errors after creation (missing binary) emits 'error';
+    // without a listener Node throws and crashes the API.
+    child.on('error', (err: Error) => {
+      push(`Error: ${err.message}`)
+      emitter.emit('done', 'failed')
+      artisanEmitters.delete(siteId)
+      artisanBuffers.delete(siteId)
     })
 
     child.stdout.on('data', (chunk) =>

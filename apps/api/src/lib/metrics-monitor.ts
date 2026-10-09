@@ -53,6 +53,12 @@ async function sampleOnce(prisma: any) {
  * (default every minute) so the Monitoring page can render historical charts.
  */
 export function startMetricsMonitor(prisma: any, intervalMs = 60_000) {
-  sampleOnce(prisma) // immediate first sample
-  return setInterval(() => { sampleOnce(prisma) }, intervalMs)
+  let running = false
+  const tick = async () => {
+    if (running) return // previous sample (slow remote SSH) not finished — skip this tick
+    running = true
+    try { await sampleOnce(prisma) } finally { running = false }
+  }
+  tick() // immediate first sample
+  return setInterval(tick, intervalMs)
 }

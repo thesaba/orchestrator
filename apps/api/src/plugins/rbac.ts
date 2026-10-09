@@ -11,7 +11,10 @@ declare module 'fastify' {
 export const rbacPlugin = fp(async (app) => {
   app.decorate('requireRole', (roles: string[]) => async (req: FastifyRequest, reply: FastifyReply) => {
     const user = req.user as { userId?: number; role?: string } | undefined
-    const role = user?.role ?? 'admin'
+    // Fail CLOSED: a token missing a role must get the least privilege, never
+    // admin (JWT/PAT always set role today, but a future token shape shouldn't
+    // silently become admin).
+    const role = user?.role ?? 'viewer'
     if (!roles.includes(role)) {
       return reply.code(403).send({ error: 'Forbidden: insufficient role' })
     }
@@ -21,7 +24,7 @@ export const rbacPlugin = fp(async (app) => {
     const user = req.user as { userId?: number; role?: string } | undefined
     if (!user?.userId) return reply.code(401).send({ error: 'Unauthorized' })
 
-    const role = user.role ?? 'admin'
+    const role = user.role ?? 'viewer' // fail closed on a missing role
     if (role === 'admin') return // admins always have access
 
     // Route params name the site id either `id` (most site-scoped routes,

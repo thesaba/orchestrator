@@ -223,26 +223,42 @@ export async function runDeploy(
     throw Object.assign(new Error('Deploy already in progress'), { code: 409 })
   }
 
-  // Resolve the target server. null → local (original path). For a remote server
-  // we make sure the bash scripts are present on it first, then stream the same
-  // deploy.sh over SSH.
-  const serverCtx = await serverCtxById(app.prisma, opts.serverId ?? null)
-  const localServer = isLocal(serverCtx)
-  const synced = await ensureScriptsSynced(app.prisma, opts.serverId ?? null)
-  const deployScript = `${synced.scriptsDir}/deploy.sh`
-
-  // Hooks live under <rootPath>/hooks on whichever host the deploy runs on.
-  await writeHookOn(serverCtx, opts.rootPath, 'pre-deploy.sh', opts.preDeploy ?? null)
-  await writeHookOn(serverCtx, opts.rootPath, 'post-deploy.sh', opts.postDeploy ?? null)
-
-  const deployment = await app.prisma.deployment.create({
-    data: { siteId, branch: opts.branch, status: 'running' }
-  })
-
+  // Claim the site synchronously — BEFORE any await — so two near-simultaneous
+  // deploys (a double-click, or a queued deploy racing a manual one) can't both
+  // pass the guard above and launch two deploy.sh runs on the same site (which
+  // would duplicate releases, run migrations twice, and orphan the first). The
+  // emitter's presence in the map IS the claim.
   const emitter = new EventEmitter()
   emitter.setMaxListeners(20)
   deployEmitters.set(siteId, emitter)
-  deployLogBuffers.set(deployment.id, [])
+
+  let serverCtx: Awaited<ReturnType<typeof serverCtxById>>
+  let localServer = false
+  let deployScript = ''
+  let deployment: { id: number }
+  try {
+    // Resolve the target server. null → local (original path). For a remote
+    // server we make sure the bash scripts are present on it first, then stream
+    // the same deploy.sh over SSH.
+    serverCtx = await serverCtxById(app.prisma, opts.serverId ?? null)
+    localServer = isLocal(serverCtx)
+    const synced = await ensureScriptsSynced(app.prisma, opts.serverId ?? null)
+    deployScript = `${synced.scriptsDir}/deploy.sh`
+
+    // Hooks live under <rootPath>/hooks on whichever host the deploy runs on.
+    await writeHookOn(serverCtx, opts.rootPath, 'pre-deploy.sh', opts.preDeploy ?? null)
+    await writeHookOn(serverCtx, opts.rootPath, 'post-deploy.sh', opts.postDeploy ?? null)
+
+    deployment = await app.prisma.deployment.create({
+      data: { siteId, branch: opts.branch, status: 'running' }
+    })
+    deployLogBuffers.set(deployment.id, [])
+  } catch (err) {
+    // Setup failed before the deploy process started — release the claim so the
+    // site isn't wedged at 409 until the API restarts.
+    deployEmitters.delete(siteId)
+    throw err
+  }
 
   const authenticatedRepoUrl = buildAuthenticatedUrl(opts.repoUrl, opts.gitToken)
   const sanitize = (line: string) =>
@@ -975,22 +991,34 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
     if (deployEmitters.has(siteId)) return reply.code(409).send({ error: 'A deploy / rollback is already running.' })
 
-    const rbCtx = await serverCtxForSite(app.prisma, site)
-    const releasePath = path.join(site.rootPath, 'releases', release)
-    const releaseExists = isLocal(rbCtx)
-      ? await fs.access(releasePath).then(() => true).catch(() => false)
-      : await execOn(rbCtx, 'bash', ['-lc', `test -d ${shellEscape(releasePath)}`]).then(() => true).catch(() => false)
-    if (!releaseExists) return reply.code(404).send({ error: `Release ${release} not found.` })
-
-    const deployment = await app.prisma.deployment.create({
-      data: { siteId, branch: 'rollback', commit: release, status: 'running' }
-    })
-
+    // Claim the site synchronously — BEFORE any await — so a rollback can't race
+    // a deploy (or another rollback) and have both manipulate `current`.
     const emitter = new EventEmitter()
     emitter.setMaxListeners(20)
     deployEmitters.set(siteId, emitter)
     const buffer: string[] = []
-    deployLogBuffers.set(deployment.id, buffer)
+
+    const releasePath = path.join(site.rootPath, 'releases', release)
+    let rbCtx: Awaited<ReturnType<typeof serverCtxForSite>>
+    let deployment: { id: number }
+    try {
+      rbCtx = await serverCtxForSite(app.prisma, site)
+      const releaseExists = isLocal(rbCtx)
+        ? await fs.access(releasePath).then(() => true).catch(() => false)
+        : await execOn(rbCtx, 'bash', ['-lc', `test -d ${shellEscape(releasePath)}`]).then(() => true).catch(() => false)
+      if (!releaseExists) {
+        deployEmitters.delete(siteId) // release the claim before bailing
+        return reply.code(404).send({ error: `Release ${release} not found.` })
+      }
+
+      deployment = await app.prisma.deployment.create({
+        data: { siteId, branch: 'rollback', commit: release, status: 'running' }
+      })
+      deployLogBuffers.set(deployment.id, buffer)
+    } catch (err) {
+      deployEmitters.delete(siteId)
+      throw err
+    }
 
     const push = (line: string) => { buffer.push(line); emitter.emit('log', line) }
 
