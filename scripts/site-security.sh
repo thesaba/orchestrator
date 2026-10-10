@@ -23,12 +23,20 @@ HTP="$SECDIR/$DOMAIN.htpasswd"
 VHOST="/etc/nginx/sites-available/$DOMAIN"
 INCLUDE_LINE="    include $CONF;"
 
-mkdir -p "$SECDIR"; chmod 750 "$SECDIR"
+mkdir -p "$SECDIR"
+# The htpasswd file is read by the nginx WORKER (www-data), not just the master.
+# Give the dir+file group=www-data with group-read so the worker can read them —
+# otherwise nginx returns 500 (can't open the auth file) instead of a 401 prompt.
+# Still not world-readable, so the (hashed) credentials stay private.
+chown root:www-data "$SECDIR" 2>/dev/null || true
+chmod 750 "$SECDIR"
 
 # Write the snippet (empty when disabling) and the htpasswd file.
 printf '%s\n' "${SEC_SNIPPET:-}" > "$CONF"
 if [ -n "${SEC_HTPASSWD:-}" ]; then
-  printf '%s\n' "$SEC_HTPASSWD" > "$HTP"; chmod 640 "$HTP"
+  printf '%s\n' "$SEC_HTPASSWD" > "$HTP"
+  chown root:www-data "$HTP" 2>/dev/null || true
+  chmod 640 "$HTP"
 else
   rm -f "$HTP" 2>/dev/null || true
 fi
