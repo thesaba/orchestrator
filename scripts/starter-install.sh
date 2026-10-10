@@ -143,9 +143,13 @@ wordpress)
     curl -sSL --max-time 120 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /usr/local/bin/wp
     chmod +x /usr/local/bin/wp
   fi
-  WP="sudo -u www-data wp --path=$CURRENT"
-
-  mkdir -p "$CURRENT"; chown -R www-data:www-data "$CURRENT"
+  # Give wp-cli a writable HOME + cache dir — www-data's default HOME (/var/www)
+  # is not writable by it, which otherwise prints a harmless but noisy
+  # "mkdir(): Permission denied" warning on every run. `env` sets these for the
+  # www-data process regardless of how sudo handles the environment.
+  WP_CACHE="$SHARED/.wp-cli-cache"
+  mkdir -p "$CURRENT" "$WP_CACHE"; chown -R www-data:www-data "$CURRENT" "$WP_CACHE"
+  WP="sudo -u www-data env HOME=$SHARED WP_CLI_CACHE_DIR=$WP_CACHE wp --path=$CURRENT"
   log "[2/5] Downloading WordPress core…"
   $WP core download --locale=en_US
   log "[3/5] Creating wp-config.php…"
