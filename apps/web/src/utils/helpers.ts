@@ -9,6 +9,9 @@ export function domainToSlug(domain: string): string {
 }
 
 export function generatePassword(length = 20): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%'
+  // Symbol set is deliberately shell-, SQL- and .env-safe: no $ ` ' " \ space { }
+  // so the value passes through mysql "IDENTIFIED BY '…'", a .env file and wp-cli
+  // without quoting surprises. Still strong (62+ alphabet).
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#%^*-_=+.?'
   return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }

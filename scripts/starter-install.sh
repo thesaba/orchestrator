@@ -51,7 +51,12 @@ fi
 if ! printf '%s' "$DB_NAME" | grep -qE '^[A-Za-z0-9_]+$'; then echo "ERROR: invalid db name" >&2; exit 1; fi
 if ! printf '%s' "$DB_USER" | grep -qE '^[A-Za-z0-9_]+$'; then echo "ERROR: invalid db user" >&2; exit 1; fi
 if ! printf '%s' "$PHP_VER" | grep -qE '^[0-9]+\.[0-9]+$'; then echo "ERROR: invalid php version" >&2; exit 1; fi
-reject_shell_meta "db password" "$DB_PASS"
+# DB password: match provision.sh / the API exactly — forbid only the characters
+# that could break out of the single-quoted SQL literal. '$' is allowed (it is
+# written into .env quoted, and passed to wp-cli double-quoted, both safe).
+case "$DB_PASS" in
+  *[\'\"\\\`]*) echo "ERROR: db password contains forbidden characters (' \" \\ \`)" >&2; exit 1 ;;
+esac
 reject_shell_meta "app url" "$APP_URL"
 case "$STARTER" in laravel|wordpress|static|node) ;; *) echo "ERROR: invalid starter '$STARTER'" >&2; exit 1 ;; esac
 
@@ -98,7 +103,9 @@ laravel)
   set_env "$SHARED/.env" DB_PORT        "3306"
   set_env "$SHARED/.env" DB_DATABASE    "$DB_NAME"
   set_env "$SHARED/.env" DB_USERNAME    "$DB_USER"
-  set_env "$SHARED/.env" DB_PASSWORD    "$DB_PASS"
+  # Quote the password so a '$' (allowed by the API) is never treated as .env
+  # variable interpolation by Laravel's dotenv parser.
+  set_env "$SHARED/.env" DB_PASSWORD    "\"$DB_PASS\""
 
   log "[3/6] Linking shared storage + .env (deploy-compatible layout)…"
   # Merge Laravel's default storage skeleton into the shared/ one provision.sh
