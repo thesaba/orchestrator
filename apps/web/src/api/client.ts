@@ -254,7 +254,7 @@ export const api = {
   },
   servers: {
     list: () => request<{ servers: ServerInfo[] }>('/servers'),
-    create: (data: { name: string; host: string; port?: number; sshUser?: string; sshKey: string; notes?: string }) =>
+    create: (data: { name: string; host: string; port?: number; sshUser?: string; sshKey: string; notes?: string; monthlyCostMinor?: number; costCurrency?: string }) =>
       request<ServerInfo>('/servers', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: number, data: { name?: string; host?: string; port?: number; sshUser?: string; sshKey?: string; notes?: string; monthlyCostMinor?: number; costCurrency?: string }) =>
       request<ServerInfo>(`/servers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

@@ -138,7 +138,11 @@ function WebhookModal({ events, onClose, onSaved, onError }: { events: string[];
       <Modal.Section>
         <BlockStack gap="300">
           <TextField label="Name" value={name} onChange={setName} autoComplete="off" />
-          <TextField label="URL" value={url} onChange={setUrl} autoComplete="off" placeholder="https://…" />
+          <TextField label="URL" value={url} onChange={setUrl} autoComplete="off" placeholder="https://webhook.site/<your-id>"
+            helpText="Paste the delivery endpoint URL, not the dashboard/view URL. For webhook.site use https://webhook.site/<id> — NOT https://webhook.site/#!/view/<id> (that one 404s)." />
+          {/\/#!\/view\//.test(url) && (
+            <Banner tone="warning">That looks like a webhook.site <em>view</em> URL. Use the endpoint URL instead: <strong>{url.replace('/#!/view/', '/')}</strong></Banner>
+          )}
           <TextField label="Secret (optional — HMAC signs deliveries)" value={secret} onChange={setSecret} autoComplete="off" />
           <Checkbox label="Active" checked={active} onChange={setActive} />
           <Divider />

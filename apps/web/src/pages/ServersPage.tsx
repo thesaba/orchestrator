@@ -48,6 +48,8 @@ export function ServersPage() {
   const [sshUser, setSshUser] = useState('root')
   const [sshKey, setSshKey] = useState('')
   const [notes, setNotes] = useState('')
+  const [cost, setCost] = useState('')          // monthly cost in major units (e.g. GEL)
+  const [currency, setCurrency] = useState('GEL')
   const [saving, setSaving] = useState(false)
   const [testResult, setTestResult] = useState<ServerProbe | null>(null)
   const [testing, setTesting] = useState(false)
@@ -60,24 +62,30 @@ export function ServersPage() {
 
   const openAdd = () => {
     setEditing(null); setName(''); setHost(''); setPort('22'); setSshUser('root'); setSshKey(''); setNotes('')
+    setCost(''); setCurrency('GEL')
     setTestResult(null); setModalOpen(true)
   }
   const openEdit = (s: ServerInfo) => {
     setEditing(s); setName(s.name); setHost(s.host ?? ''); setPort(String(s.port)); setSshUser(s.sshUser)
-    setSshKey(''); setNotes(s.notes ?? ''); setTestResult(null); setModalOpen(true)
+    setSshKey(''); setNotes(s.notes ?? '')
+    setCost(s.monthlyCostMinor ? String(s.monthlyCostMinor / 100) : '')
+    setCurrency(s.costCurrency || 'GEL')
+    setTestResult(null); setModalOpen(true)
   }
 
   const save = async () => {
     setSaving(true)
+    const monthlyCostMinor = Math.max(0, Math.round((Number(cost) || 0) * 100))
+    const costCurrency = (currency || 'GEL').toUpperCase()
     try {
       if (editing) {
         await api.servers.update(editing.id, {
-          name, notes,
+          name, notes, monthlyCostMinor, costCurrency,
           ...(editing.kind === 'remote' ? { host, port: Number(port), sshUser, ...(sshKey ? { sshKey } : {}) } : {})
         })
         showToast('Server updated')
       } else {
-        await api.servers.create({ name, host, port: Number(port), sshUser, sshKey, notes: notes || undefined })
+        await api.servers.create({ name, host, port: Number(port), sshUser, sshKey, notes: notes || undefined, monthlyCostMinor, costCurrency })
         showToast('Server added')
       }
       setModalOpen(false); load()
@@ -162,6 +170,7 @@ export function ServersPage() {
                       <Text as="h3" variant="headingMd">{s.name}</Text>
                       {statusBadge(s)}
                       {s.siteCount > 0 && <Badge>{`${s.siteCount} site${s.siteCount === 1 ? '' : 's'}`}</Badge>}
+                      {s.monthlyCostMinor > 0 && <Badge tone="info">{`${s.costCurrency} ${(s.monthlyCostMinor / 100).toFixed(2)}/mo`}</Badge>}
                     </InlineStack>
                     <Text as="p" variant="bodySm" tone="subdued">
                       {s.kind === 'local'
@@ -271,6 +280,26 @@ export function ServersPage() {
               </>
             )}
             <TextField label="Notes (optional)" value={notes} onChange={setNotes} autoComplete="off" multiline={2} />
+
+            <InlineStack gap="300" wrap>
+              <div style={{ flex: 2, minWidth: 180 }}>
+                <TextField
+                  label="Monthly cost"
+                  type="number"
+                  value={cost}
+                  onChange={setCost}
+                  autoComplete="off"
+                  min={0}
+                  step={0.01}
+                  prefix={currency}
+                  placeholder="32"
+                  helpText="What this server costs you per month. Used by the profitability report on the Billing page."
+                />
+              </div>
+              <div style={{ width: 110 }}>
+                <TextField label="Currency" value={currency} onChange={(v) => setCurrency(v.toUpperCase().slice(0, 3))} autoComplete="off" maxLength={3} placeholder="GEL" />
+              </div>
+            </InlineStack>
 
             {(!editing || editing.kind === 'remote') && (
               <InlineStack gap="200" blockAlign="center">

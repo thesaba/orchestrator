@@ -82,18 +82,22 @@ export const serversRoutes: FastifyPluginAsync = async (app) => {
           port:    { type: 'integer', minimum: 1, maximum: 65535 },
           sshUser: { type: 'string', minLength: 1, maxLength: 64 },
           sshKey:  { type: 'string', minLength: 1, maxLength: 20000 },
-          notes:   { type: 'string', maxLength: 1000 }
+          notes:   { type: 'string', maxLength: 1000 },
+          monthlyCostMinor: { type: 'integer', minimum: 0, maximum: 100000000 },
+          costCurrency:     { type: 'string', minLength: 3, maxLength: 3 }
         },
         additionalProperties: false
       }
     }
   }, async (request, reply) => {
-    const b = request.body as { name: string; host: string; port?: number; sshUser?: string; sshKey: string; notes?: string }
+    const b = request.body as { name: string; host: string; port?: number; sshUser?: string; sshKey: string; notes?: string; monthlyCostMinor?: number; costCurrency?: string }
     const server = await prisma.server.create({
       data: {
         name: b.name, kind: 'remote', host: b.host, port: b.port ?? 22,
         sshUser: b.sshUser ?? 'root', sshKey: writeSecret(b.sshKey),
-        sshKeyFingerprint: keyChecksum(b.sshKey), notes: b.notes ?? null
+        sshKeyFingerprint: keyChecksum(b.sshKey), notes: b.notes ?? null,
+        monthlyCostMinor: b.monthlyCostMinor ?? 0,
+        costCurrency: (b.costCurrency ?? 'GEL').toUpperCase()
       }
     })
     app.audit('server.created', { req: request, meta: { serverId: server.id, host: b.host } })
