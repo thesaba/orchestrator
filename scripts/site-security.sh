@@ -39,7 +39,11 @@ fi
 # server_name so both the :80 and :443 server blocks are covered.
 if ! grep -qF "include $CONF;" "$VHOST"; then
   cp -f "$VHOST" "$VHOST.security-bak"
-  awk -v inc="$INCLUDE_LINE" '{ print } /server_name/ { print inc }' "$VHOST.security-bak" > "$VHOST.tmp"
+  # Match ONLY a real `server_name` directive (line starts with optional
+  # whitespace then `server_name` + whitespace) — never a comment that merely
+  # mentions the words "server_name", which would otherwise insert the include
+  # (and thus auth_basic) twice in the same block → "directive is duplicate".
+  awk -v inc="$INCLUDE_LINE" '{ print } /^[[:space:]]*server_name[[:space:]]/ { print inc }' "$VHOST.security-bak" > "$VHOST.tmp"
   mv -f "$VHOST.tmp" "$VHOST"
   if ! nginx -t 2>/tmp/oc-nginx-sec.$$; then
     cp -f "$VHOST.security-bak" "$VHOST"   # ← restore: site untouched

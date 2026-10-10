@@ -1124,7 +1124,7 @@ export function SiteDetailPage() {
                 </InlineStack>
 
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Runs <InlineCode>php artisan down</InlineCode> / <InlineCode>php artisan up</InlineCode>. While down, Laravel returns a 503 maintenance page. With a secret you can bypass it via <InlineCode>?secret=…</InlineCode>.
+                  Runs <InlineCode>php artisan down</InlineCode> / <InlineCode>php artisan up</InlineCode>. While down, Laravel returns a 503 maintenance page. With a secret, visit <InlineCode>https://{site.domain}/&lt;secret&gt;</InlineCode> once — Laravel sets a bypass cookie, then you can browse normally.
                 </Text>
 
                 {maintenanceError && (
@@ -1139,7 +1139,7 @@ export function SiteDetailPage() {
                       onChange={setMaintenanceSecret}
                       autoComplete="off"
                       placeholder="my-bypass-secret"
-                      helpText={`Access your site at https://${site.domain}?secret=${maintenanceSecret || 'my-bypass-secret'} while it's in maintenance mode.`}
+                      helpText={`While in maintenance, visit https://${site.domain}/${maintenanceSecret || 'my-bypass-secret'} once to bypass it (the secret is a URL path, not ?secret=).`}
                     />
                     <InlineStack>
                       <Button tone="critical" onClick={() => handleMaintenance('down')} loading={maintenanceLoading} disabled={site.status !== 'active'}>
