@@ -11,6 +11,9 @@ import {
 } from '../api/client'
 import { api } from '../api/client'
 import { ServerEconomicsCard } from '../components/ServerEconomicsCard'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid, Legend, Cell
+} from 'recharts'
 
 // Ladder rungs, least → most severe. Used for the level badge.
 const LEVEL_TONE: Record<EnforcementLevel, 'success' | 'attention' | 'warning' | 'critical'> = {
@@ -700,29 +703,113 @@ function ProfitabilityTab({ onError }: { onError: (m: string) => void }) {
   if (loading) return <Box padding="600"><InlineStack align="center"><Spinner size="small" /></InlineStack></Box>
   if (!rows.length) return <Card><Box padding="400"><Text as="p" tone="subdued">No subscriptions to analyse yet.</Text></Box></Card>
 
-  // Revenue per site on a shared box: the lower this is, the worse the deal.
-  const scored = [...rows]
-    .map((r) => ({ ...r, perSiteShare: Math.round(r.amount / Math.max(1, r.sitesOnServer)) }))
-    .sort((a, b) => a.perSiteShare - b.perSiteShare)
+  // Net margin per site = what the client pays minus that site's share of its
+  // server's monthly cost (server cost ÷ all sites on it). Worst margin first —
+  // those are the re-price / move candidates.
+  const scored = [...rows].sort((a, b) => a.netMarginMinor - b.netMarginMinor)
+
+  // Big-picture totals. Server cost is counted once per server (serverCostMinor
+  // is the whole box, repeated on each of its rows). Assumes a single currency;
+  // the per-row figures below stay correct regardless.
+  const currency = rows[0]?.currency ?? 'GEL'
+  const totalRevenueMinor = rows.reduce((a, r) => a + r.amount, 0)
+  const seen = new Set<number | null>()
+  let totalCostMinor = 0
+  for (const r of rows) {
+    const k = r.serverId ?? null
+    if (!seen.has(k)) { seen.add(k); totalCostMinor += r.serverCostMinor }
+  }
+  const totalMarginMinor = totalRevenueMinor - totalCostMinor
+
+  const GREEN = '#2e7d4f', RED = '#d72c0d', GREY = '#8c9196'
+  const money = (minor: number) => formatMinor(minor, currency)
+
+  // Big-picture: revenue vs cost vs margin (one bar each).
+  const summaryData = [
+    { name: 'Revenue', value: totalRevenueMinor / 100, fill: GREEN },
+    { name: 'Cost',    value: totalCostMinor / 100,    fill: GREY },
+    { name: 'Margin',  value: totalMarginMinor / 100,  fill: totalMarginMinor >= 0 ? GREEN : RED }
+  ]
+
+  // Per-site: what each billed site pays vs its share of the server cost.
+  const perSiteData = scored.map((r) => ({
+    name: r.domain,
+    Pays: r.amount / 100,
+    'Server cost': r.costShareMinor / 100,
+    margin: r.netMarginMinor / 100
+  }))
 
   return (
     <BlockStack gap="300">
       <ServerEconomicsCard />
+
+      {/* Big-picture: revenue vs cost vs margin */}
+      <Card>
+        <BlockStack gap="300">
+          <BlockStack gap="050">
+            <Text as="h2" variant="headingMd">Revenue, cost & margin</Text>
+            <Text as="span" variant="bodySm" tone="subdued">
+              Across servers that host billed sites · margin = {money(totalMarginMinor)} / mo
+            </Text>
+          </BlockStack>
+          <div style={{ width: '100%', height: 220 }}>
+            <ResponsiveContainer>
+              <BarChart data={summaryData} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} width={48} />
+                <RTooltip formatter={(v) => `${Number(v).toFixed(2)} ${currency}`} />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                  {summaryData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </BlockStack>
+      </Card>
+
+      {/* Per-site: revenue vs its share of server cost */}
+      <Card>
+        <BlockStack gap="300">
+          <BlockStack gap="050">
+            <Text as="h2" variant="headingMd">Per-site: paid vs server cost</Text>
+            <Text as="span" variant="bodySm" tone="subdued">
+              Each site's share of its server cost = server cost ÷ all sites on it. Green gap above grey = profit.
+            </Text>
+          </BlockStack>
+          <div style={{ width: '100%', height: Math.max(220, perSiteData.length * 48) }}>
+            <ResponsiveContainer>
+              <BarChart data={perSiteData} layout="vertical" margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 12 }} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={110} />
+                <RTooltip formatter={(v) => `${Number(v).toFixed(2)} ${currency}`} />
+                <Legend />
+                <Bar dataKey="Pays" fill={GREEN} radius={[0, 4, 4, 0]} />
+                <Bar dataKey="Server cost" fill={GREY} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </BlockStack>
+      </Card>
+
       <Banner tone="info">
-        Sites sharing a crowded server while paying the least are the first candidates to
-        re-price or move to their own droplet.
+        Sites with the lowest (or negative) net margin are the first candidates to re-price or move to their own droplet.
       </Banner>
+
       <Card>
         <DataTable
           columnContentTypes={['text', 'text', 'numeric', 'numeric', 'numeric', 'text']}
-          headings={['Site', 'Client', 'Pays', 'Sites on server', 'Revenue ÷ sites', 'State']}
+          headings={['Site', 'Client', 'Pays', 'Server cost / site', 'Net margin / site', 'State']}
           rows={scored.map((r) => [
             r.domain,
             r.client,
             r.amountFormatted,
-            String(r.sitesOnServer),
-            formatMinor(r.perSiteShare, r.currency),
-            <Badge key={r.siteId} tone={LEVEL_TONE[r.enforcementLevel]}>{LEVEL_LABEL[r.enforcementLevel]}</Badge>
+            formatMinor(r.costShareMinor, r.currency),
+            <Text key={r.siteId} as="span" tone={r.netMarginMinor >= 0 ? 'success' : 'critical'} fontWeight="semibold">
+              {formatMinor(r.netMarginMinor, r.currency)}
+            </Text>,
+            <Badge key={`b${r.siteId}`} tone={LEVEL_TONE[r.enforcementLevel]}>{LEVEL_LABEL[r.enforcementLevel]}</Badge>
           ])}
         />
       </Card>

@@ -1638,6 +1638,7 @@ export const billingApi = {
   profitability: () => request<Array<{
     siteId: number; domain: string; client: string; amount: number; currency: string
     amountFormatted: string; serverId: number | null; sitesOnServer: number
+    serverCostMinor: number; costShareMinor: number; netMarginMinor: number
     status: string; enforcementLevel: EnforcementLevel
   }>>('/billing/profitability'),
   serverEconomics: () => request<{ servers: Array<{

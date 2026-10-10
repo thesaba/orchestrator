@@ -632,18 +632,40 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       const key = s.serverId ?? null
       sitesPerServer.set(key, (sitesPerServer.get(key) ?? 0) + 1)
     }
-    return subs.map((s: any) => ({
-      siteId: s.siteId,
-      domain: s.site?.domain,
-      client: s.client?.name,
-      amount: s.amount,
-      currency: s.currency,
-      amountFormatted: formatMoney(s.amount, s.currency),
-      serverId: s.site?.serverId ?? null,
-      sitesOnServer: sitesPerServer.get(s.site?.serverId ?? null) ?? 1,
-      status: s.status,
-      enforcementLevel: s.enforcementLevel
-    }))
+
+    // Each site's share of its server's monthly cost = server cost / all sites on
+    // it (billed + unbilled). Sites with serverId=null live on the local box, so
+    // their cost comes from the local server row.
+    const servers = await db.server.findMany({ select: { id: true, kind: true, monthlyCostMinor: true } })
+    const localId: number | null = servers.find((x: any) => x.kind === 'local')?.id ?? null
+    const costById = new Map<number, number>()
+    for (const sv of servers) costById.set(sv.id, sv.monthlyCostMinor ?? 0)
+    const serverCostFor = (serverId: number | null): number => {
+      if (serverId == null) return (localId != null ? costById.get(localId) : 0) ?? 0
+      return costById.get(serverId) ?? 0
+    }
+
+    return subs.map((s: any) => {
+      const serverId = s.site?.serverId ?? null
+      const sitesOnServer = sitesPerServer.get(serverId) ?? 1
+      const serverCostMinor = serverCostFor(serverId)
+      const costShareMinor = Math.round(serverCostMinor / Math.max(1, sitesOnServer))
+      return {
+        siteId: s.siteId,
+        domain: s.site?.domain,
+        client: s.client?.name,
+        amount: s.amount,
+        currency: s.currency,
+        amountFormatted: formatMoney(s.amount, s.currency),
+        serverId,
+        sitesOnServer,
+        serverCostMinor,
+        costShareMinor,
+        netMarginMinor: s.amount - costShareMinor,
+        status: s.status,
+        enforcementLevel: s.enforcementLevel
+      }
+    })
   })
 
   // ── Server economics — cost vs revenue vs margin vs utilization ────────────
