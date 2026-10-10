@@ -69,12 +69,22 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     const cwd = path.join(site.rootPath, 'current')
     const php = `php${site.phpVersion}`
 
-    const cmd = pkg
-      ? `${php} $(command -v composer) update "${pkg}" --no-interaction --no-ansi --ignore-platform-reqs -W 2>&1`
-      : `${php} $(command -v composer) update --no-interaction --no-ansi --ignore-platform-reqs 2>&1`
+    // Run composer AS www-data (the app owner), not as the panel's root user.
+    // Running as root in a www-data-owned Laravel release makes git refuse the
+    // repo ("dubious ownership") and makes post-update artisan scripts fail when
+    // they write to www-data-owned storage/bootstrap-cache. A writable
+    // COMPOSER_HOME under the site's shared/ dir also enables the package cache.
+    const sharedHome    = `${site.rootPath}/shared`
+    const composerHome  = `${sharedHome}/.composer`
+    const prep = `mkdir -p "${composerHome}" && chown www-data:www-data "${composerHome}" "${sharedHome}" 2>/dev/null || true`
+    const asWww = `sudo -u www-data env HOME="${sharedHome}" COMPOSER_HOME="${composerHome}"`
+    const updateArgs = pkg
+      ? `update "${pkg}" --no-interaction --no-ansi --ignore-platform-reqs -W`
+      : `update --no-interaction --no-ansi --ignore-platform-reqs`
+    const cmd = `${prep}; ${asWww} ${php} $(command -v composer) ${updateArgs} 2>&1`
 
     try {
-      const { stdout } = await execOn(ctx, 'bash', ['-lc', cmd], { cwd, timeout: 300_000, env: { COMPOSER_ALLOW_SUPERUSER: '1' } })
+      const { stdout } = await execOn(ctx, 'bash', ['-lc', cmd], { cwd, timeout: 300_000 })
       app.audit('composer.update', { siteId: site.id, meta: { package: pkg ?? 'all', domain: site.domain } })
       return { ok: true, output: stdout }
     } catch (err: unknown) {
