@@ -35,7 +35,15 @@ export function ComposerTab({ siteId }: { siteId: number }) {
     try {
       const r = await composerApi.update(siteId, pkg, targetVersion)
       setOutput(r.output)
-      showToast(targetVersion ? `Upgraded ${pkg} to ^${targetVersion}` : pkg ? `Updated ${pkg}` : 'All packages updated')
+      // Composer can finish successfully yet change nothing — e.g. a package held
+      // back by another installed package's version requirement. Say so plainly
+      // instead of a misleading "Updated".
+      const noChange = /Nothing to (modify in lock file|install, update or remove)/i.test(r.output)
+      if (noChange && pkg) {
+        showToast(`${pkg}: no change — it's held back by another package's requirements (update that one too).`)
+      } else {
+        showToast(targetVersion ? `Upgraded ${pkg} to ^${targetVersion}` : pkg ? `Updated ${pkg}` : 'All packages updated')
+      }
       load()
     } catch (e: unknown) {
       setError((e as Error).message)
