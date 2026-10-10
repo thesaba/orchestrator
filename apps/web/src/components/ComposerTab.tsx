@@ -1,8 +1,14 @@
-import { BlockStack, InlineStack, Text, Badge, Button, Banner, DataTable, Spinner, TextField } from '@shopify/polaris'
+import { BlockStack, InlineStack, Text, Badge, Button, Banner, DataTable, Spinner, TextField, Modal } from '@shopify/polaris'
 import { useEffect, useState } from 'react'
 import { composerApi, ComposerPackage } from '../api/client'
 import { useToast } from '../context/toast'
 import { LogConsole } from './LogConsole'
+
+// "semver-safe-update" / "up-to-date" stay within the composer.json constraint;
+// anything else (notably "update-possible") is a MAJOR jump outside it and needs
+// a constraint bump, which can bring breaking changes.
+const isMajor = (p: ComposerPackage) =>
+  !!p['latest-status'] && p['latest-status'] !== 'semver-safe-update' && p['latest-status'] !== 'up-to-date'
 
 export function ComposerTab({ siteId }: { siteId: number }) {
   const [packages, setPackages]   = useState<ComposerPackage[]>([])
@@ -11,6 +17,7 @@ export function ComposerTab({ siteId }: { siteId: number }) {
   const [updating, setUpdating]   = useState<string | null>(null)
   const [error,    setError]      = useState('')
   const [filter,   setFilter]     = useState('')
+  const [majorConfirm, setMajorConfirm] = useState<ComposerPackage | null>(null)
   const showToast = useToast()
 
   const load = () => {
@@ -23,12 +30,12 @@ export function ComposerTab({ siteId }: { siteId: number }) {
 
   useEffect(() => { load() }, [siteId]) // eslint-disable-line
 
-  const doUpdate = async (pkg?: string) => {
+  const doUpdate = async (pkg?: string, targetVersion?: string) => {
     setUpdating(pkg ?? 'all'); setOutput(''); setError('')
     try {
-      const r = await composerApi.update(siteId, pkg)
+      const r = await composerApi.update(siteId, pkg, targetVersion)
       setOutput(r.output)
-      showToast(pkg ? `Updated ${pkg}` : 'All packages updated')
+      showToast(targetVersion ? `Upgraded ${pkg} to ^${targetVersion}` : pkg ? `Updated ${pkg}` : 'All packages updated')
       load()
     } catch (e: unknown) {
       setError((e as Error).message)
@@ -70,12 +77,18 @@ export function ComposerTab({ siteId }: { siteId: number }) {
                 <Text as="span" variant="bodySm" fontWeight="semibold">{p.name}</Text>,
                 <code style={{ fontSize: 12 }}>{p.version}</code>,
                 <code style={{ fontSize: 12, color: 'var(--oc-accent)' }}>{p.latest}</code>,
-                <Badge tone={p['latest-status'] === 'up-to-date' ? 'success' : 'warning'}>
+                <Badge tone={p['latest-status'] === 'up-to-date' ? 'success' : isMajor(p) ? 'attention' : 'warning'}>
                   {p['latest-status'] ?? 'outdated'}
                 </Badge>,
-                <Button size="micro" onClick={() => doUpdate(p.name)} loading={updating === p.name} disabled={!!updating}>
-                  Update
-                </Button>
+                isMajor(p) ? (
+                  <Button size="micro" tone="critical" variant="tertiary" onClick={() => setMajorConfirm(p)} loading={updating === p.name} disabled={!!updating}>
+                    Upgrade (major)
+                  </Button>
+                ) : (
+                  <Button size="micro" onClick={() => doUpdate(p.name)} loading={updating === p.name} disabled={!!updating}>
+                    Update
+                  </Button>
+                )
               ])}
             />
           </div>
@@ -88,6 +101,34 @@ export function ComposerTab({ siteId }: { siteId: number }) {
           <LogConsole lines={[output]} minHeight={120} maxHeight={300} />
         </BlockStack>
       )}
+
+      <Modal
+        open={!!majorConfirm}
+        onClose={() => setMajorConfirm(null)}
+        title={`Major upgrade — ${majorConfirm?.name ?? ''}`}
+        primaryAction={{
+          content: `Upgrade to ^${majorConfirm?.latest ?? ''}`,
+          destructive: true,
+          loading: !!updating,
+          onAction: () => {
+            const p = majorConfirm
+            setMajorConfirm(null)
+            if (p) doUpdate(p.name, p.latest)
+          }
+        }}
+        secondaryActions={[{ content: 'Cancel', onAction: () => setMajorConfirm(null) }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="300">
+            <Banner tone="warning">
+              This changes the version constraint in <code>composer.json</code> to a new major version, which can introduce <strong>breaking changes</strong>. Test the site afterwards, and roll back the deploy if needed.
+            </Banner>
+            <Text as="p">
+              {majorConfirm?.name}: <code>{majorConfirm?.version}</code> → <code>^{majorConfirm?.latest}</code>
+            </Text>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
     </BlockStack>
   )
 }

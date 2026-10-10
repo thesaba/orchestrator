@@ -961,10 +961,13 @@ export const statsApi = {
 export const composerApi = {
   outdated: (siteId: number) =>
     request<{ packages: ComposerPackage[] }>(`/sites/${siteId}/composer/outdated`),
-  update: (siteId: number, pkg?: string) =>
+  // targetVersion set → MAJOR upgrade: bumps the composer.json constraint to
+  // ^targetVersion via `composer require` (may introduce breaking changes).
+  // Omitted → semver-safe update within the existing constraint.
+  update: (siteId: number, pkg?: string, targetVersion?: string) =>
     request<{ ok: boolean; output: string }>(`/sites/${siteId}/composer/update`, {
       method: 'POST',
-      body: JSON.stringify(pkg ? { package: pkg } : {})
+      body: JSON.stringify({ ...(pkg ? { package: pkg } : {}), ...(targetVersion ? { targetVersion } : {}) })
     })
 }
 

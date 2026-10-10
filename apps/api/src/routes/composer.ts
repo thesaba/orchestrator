@@ -43,7 +43,10 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
       body: {
         type: 'object',
         properties: {
-          package: { type: 'string', maxLength: 200 } // empty = update all
+          package: { type: 'string', maxLength: 200 }, // empty = update all
+          // Present → MAJOR upgrade: bump the composer.json constraint to
+          // ^targetVersion via `composer require`. Requires `package`.
+          targetVersion: { type: 'string', maxLength: 32 }
         },
         additionalProperties: false
       }
@@ -56,7 +59,7 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     if (site.status !== 'active') return reply.code(400).send({ error: 'Site is not active' })
 
     const ctx = await serverCtxForSite(app.prisma, site)
-    const { package: pkg } = (request.body ?? {}) as { package?: string }
+    const { package: pkg, targetVersion } = (request.body ?? {}) as { package?: string; targetVersion?: string }
 
     // The package name is interpolated into a bash -lc string; validate it to a
     // strict Composer spec (vendor/name[:constraint]) so no shell metacharacter
@@ -64,6 +67,13 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     // whole shape is simpler and safer than escaping.
     if (pkg && !/^[a-z0-9]([a-z0-9._-]*)\/[a-z0-9]([a-z0-9._-]*)(:[A-Za-z0-9._^~*<>=. -]+)?$/.test(pkg)) {
       return reply.code(400).send({ error: 'Invalid composer package name' })
+    }
+    // A major upgrade targets one package and a plain version number (e.g. 13.4.1).
+    if (targetVersion !== undefined) {
+      if (!pkg) return reply.code(400).send({ error: 'A package is required for a major upgrade' })
+      if (!/^\d+(\.\d+){0,2}$/.test(targetVersion)) {
+        return reply.code(400).send({ error: 'Invalid target version (expected e.g. 13 or 13.4.1)' })
+      }
     }
 
     const cwd = path.join(site.rootPath, 'current')
@@ -78,14 +88,25 @@ export const composerRoutes: FastifyPluginAsync = async (app) => {
     const composerHome  = `${sharedHome}/.composer`
     const prep = `mkdir -p "${composerHome}" && chown www-data:www-data "${composerHome}" "${sharedHome}" 2>/dev/null || true`
     const asWww = `sudo -u www-data env HOME="${sharedHome}" COMPOSER_HOME="${composerHome}"`
-    const updateArgs = pkg
-      ? `update "${pkg}" --no-interaction --no-ansi --ignore-platform-reqs -W`
-      : `update --no-interaction --no-ansi --ignore-platform-reqs`
-    const cmd = `${prep}; ${asWww} ${php} $(command -v composer) ${updateArgs} 2>&1`
+
+    let coreCmd: string
+    if (pkg && targetVersion) {
+      // MAJOR upgrade — change the constraint to ^targetVersion via `composer
+      // require`, preserving whether the package lives in require vs require-dev
+      // (detected from composer.json so a dev tool like phpunit isn't promoted to
+      // a production dependency). -W lets its dependencies move too.
+      const detectDev = `DEV=$(${php} -r '$j=json_decode(@file_get_contents("composer.json"),true)?:[]; echo isset($j["require-dev"]["${pkg}"])?"--dev":"";')`
+      coreCmd = `${detectDev}; ${asWww} ${php} $(command -v composer) require $DEV "${pkg}:^${targetVersion}" -W --no-interaction --no-ansi --ignore-platform-reqs`
+    } else if (pkg) {
+      coreCmd = `${asWww} ${php} $(command -v composer) update "${pkg}" --no-interaction --no-ansi --ignore-platform-reqs -W`
+    } else {
+      coreCmd = `${asWww} ${php} $(command -v composer) update --no-interaction --no-ansi --ignore-platform-reqs`
+    }
+    const cmd = `${prep}; ${coreCmd} 2>&1`
 
     try {
       const { stdout } = await execOn(ctx, 'bash', ['-lc', cmd], { cwd, timeout: 300_000 })
-      app.audit('composer.update', { siteId: site.id, meta: { package: pkg ?? 'all', domain: site.domain } })
+      app.audit('composer.update', { siteId: site.id, meta: { package: pkg ?? 'all', domain: site.domain, ...(targetVersion ? { majorTo: targetVersion } : {}) } })
       return { ok: true, output: stdout }
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; message?: string }
