@@ -91,7 +91,12 @@ laravel)
   TS="$(date +%Y%m%d%H%M%S)"
   REL="$RELEASES/$TS"
   log "[1/6] composer create-project laravel/laravel (this can take a minute)…"
-  sudo -u www-data COMPOSER_NO_INTERACTION=1 composer create-project --prefer-dist --no-progress laravel/laravel "$REL"
+  mkdir -p "$SHARED/.composer"; chown -R www-data:www-data "$SHARED/.composer"
+  # Run from the site dir (not the panel's WorkingDirectory) so composer's VCS
+  # probe doesn't trip over /opt/orchestrator's git ownership, and give it a
+  # writable HOME + COMPOSER_HOME so it can cache (www-data's HOME isn't writable).
+  ( cd "$SITE_DIR" && sudo -u www-data env HOME="$SHARED" COMPOSER_HOME="$SHARED/.composer" COMPOSER_NO_INTERACTION=1 \
+      composer create-project --prefer-dist --no-progress laravel/laravel "$REL" )
 
   log "[2/6] Wiring shared/.env with database credentials…"
   # create-project already copied .env.example → .env and ran key:generate.
