@@ -42,7 +42,7 @@ import { FileManagerTab }    from '../components/FileManagerTab'
 import { DeployHeatmap }     from '../components/DeployHeatmap'
 import { TestResultsCard }   from '../components/TestResultsCard'
 import { HealthScoreBadge }  from '../components/HealthScoreBadge'
-import { ApmCard }           from '../components/ApmCard'
+import { SiteApmCard }       from '../components/SiteApmCard'
 import { Breadcrumb }        from '../components/Breadcrumb'
 import { useToast } from '../context/toast'
 import { DatabaseTab }       from '../components/DatabaseTab'
@@ -1205,7 +1205,7 @@ export function SiteDetailPage() {
           {/* Tab 14 — Laravel Logs */}
           {tab === TAB.LOGS && (
             <BlockStack gap="400">
-              <ApmCard siteId={siteId} />
+              <SiteApmCard siteId={siteId} />
               <Card>
                 <LaravelLogsTab siteId={siteId} />
               </Card>
