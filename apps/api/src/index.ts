@@ -32,6 +32,8 @@ import { failedJobsRoutes } from './routes/failed-jobs'
 import { phpFpmRoutes } from './routes/phpfpm'
 import { s3BackupRoutes } from './routes/s3backup'
 import { logsRoutes } from './routes/logs'
+import { apmRoutes } from './routes/apm'
+import { automationRoutes } from './routes/automation'
 import { fileManagerRoutes } from './routes/filemanager'
 import { pmaInternalRoutes } from './routes/pma-internal'
 import { tasksRoutes } from './routes/tasks'
@@ -127,6 +129,8 @@ async function start() {
   await app.register(phpFpmRoutes,      { prefix: '/api/sites' })
   await app.register(s3BackupRoutes,    { prefix: '/api/sites' })
   await app.register(logsRoutes,        { prefix: '/api/sites' })
+  await app.register(apmRoutes,         { prefix: '/api/sites' })
+  await app.register(automationRoutes,  { prefix: '/api/automation' })
   await app.register(fileManagerRoutes, { prefix: '/api/sites' })
   await app.register(dbManageRoutes,    { prefix: '/api/sites' })
   await app.register(usersRoutes,       { prefix: '/api/users' })

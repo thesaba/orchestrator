@@ -178,6 +178,44 @@ export const sitesRoutes: FastifyPluginAsync = async (app) => {
     return redactGitToken(clone)
   })
 
+  // POST /:id/staging — create a staging/preview COPY (config only). The result
+  // is a normal site at staging.<domain> with the same repo/branch/stack, which
+  // you then provision + deploy via the usual (already-reviewed) flows — so no
+  // new nginx/DB orchestration is introduced here. Enable basic-auth on it so
+  // the preview isn't public.
+  app.post('/:id/staging', async (request, reply) => {
+    const sourceId = Number((request.params as { id: string }).id)
+    const source = await app.prisma.site.findUnique({ where: { id: sourceId } })
+    if (!source) return reply.code(404).send({ error: 'Source site not found' })
+    if ((source as any).stagingOf) return reply.code(400).send({ error: 'This site is already a staging copy.' })
+
+    const domain = `staging.${source.domain}`
+    const existing = await app.prisma.site.findUnique({ where: { domain } })
+    if (existing) return reply.code(409).send({ error: `A site for ${domain} already exists.` })
+
+    const staging = await app.prisma.site.create({
+      data: {
+        name: `${source.name} (staging)`,
+        domain,
+        phpVersion: source.phpVersion,
+        stackType: (source as any).stackType ?? 'laravel',
+        rootPath: `/var/www/sites/${domain}`,
+        repoUrl: source.repoUrl,
+        branch: source.branch,
+        preDeploy: source.preDeploy,
+        postDeploy: source.postDeploy,
+        healthCheck: false, // don't add uptime noise for a preview
+        serverId: (source as any).serverId ?? null,
+        stagingOf: sourceId,
+        tags: JSON.stringify(['staging'])
+      }
+    })
+
+    app.audit('site.staging_created', { siteId: staging.id, meta: { from: source.domain, to: domain } })
+    reply.code(201)
+    return redactGitToken(staging)
+  })
+
   // NOTE: PATCH /:id (tags/pinned/notes/repo/hooks/etc.) lives in deploy.ts —
   // both this file and deploy.ts are registered under the same '/api/sites'
   // prefix, and Fastify doesn't allow two plugins to declare the same

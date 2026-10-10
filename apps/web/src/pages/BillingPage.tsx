@@ -10,6 +10,7 @@ import {
   type SubscriptionPreview, type TickReport
 } from '../api/client'
 import { api } from '../api/client'
+import { ServerEconomicsCard } from '../components/ServerEconomicsCard'
 
 // Ladder rungs, least → most severe. Used for the level badge.
 const LEVEL_TONE: Record<EnforcementLevel, 'success' | 'attention' | 'warning' | 'critical'> = {
@@ -706,6 +707,7 @@ function ProfitabilityTab({ onError }: { onError: (m: string) => void }) {
 
   return (
     <BlockStack gap="300">
+      <ServerEconomicsCard />
       <Banner tone="info">
         Sites sharing a crowded server while paying the least are the first candidates to
         re-price or move to their own droplet.

@@ -66,7 +66,7 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
 
     await app.prisma.site.update({
       where: { id: siteId },
-      data: { status: 'provisioning', dbName, dbUser }
+      data: { status: 'provisioning', dbName, dbUser, stackType: template }
     })
 
     // Resolve the target server (null → local). For a remote server, make sure

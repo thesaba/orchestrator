@@ -99,6 +99,11 @@ model Server {
   status        String   @default("unknown")     // unknown | online | offline
   lastSeenAt    DateTime?
   notes         String?
+  // Monthly hosting cost of this server, in integer minor units (e.g. tetri),
+  // used by the Server Economics report (revenue vs cost vs margin). Additive,
+  // defaults to 0 so existing rows and the serving path are unaffected.
+  monthlyCostMinor Int    @default(0)
+  costCurrency     String @default("GEL")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   sites         Site[]
@@ -114,6 +119,13 @@ model Site {
   serverId        Int?
   server          Server?        @relation(fields: [serverId], references: [id])
   phpVersion      String         @default("8.2")
+  // Runtime stack: laravel | wordpress | static | node. Defaults to laravel so
+  // every existing site deploys byte-for-byte as before (deploy.sh gates the
+  // PHP/Laravel-specific steps on this value).
+  stackType       String         @default("laravel")
+  // If set, this site is a staging/preview COPY of site <stagingOf>. Additive;
+  // null for every normal site.
+  stagingOf       Int?
   dbName          String?
   dbUser          String?
   sslEnabled      Boolean        @default(false)
@@ -658,4 +670,67 @@ model BillingEvent {
 model BillingCounter {
   year Int @id
   seq  Int @default(0)
+}
+
+// ── Automation & outbound webhooks (all additive, off by default) ────────────
+
+/// An outbound webhook: the panel POSTs an event payload here, HMAC-signed with
+/// `secret`. Inert until `active` is set true.
+model Webhook {
+  id        Int      @id @default(autoincrement())
+  name      String
+  url       String
+  secret    String?  // encrypted at rest; HMAC-SHA256 key for signing deliveries
+  events    String   @default("[]") // JSON array of event types; [] = all events
+  active    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deliveries WebhookDelivery[]
+}
+
+/// Delivery log for a webhook (bounded; newest kept).
+model WebhookDelivery {
+  id         Int      @id @default(autoincrement())
+  webhookId  Int
+  webhook    Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event      String
+  success    Boolean  @default(false)
+  statusCode Int?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([webhookId, createdAt])
+}
+
+/// An automation rule: when `trigger` fires and `conditions` match, run
+/// `actionType`. Fires nothing until `enabled` is true; while `dryRun` is true
+/// it only records what it WOULD do (same discipline as billing enforcement).
+model AutomationRule {
+  id           Int      @id @default(autoincrement())
+  name         String
+  trigger      String   // event type, e.g. "deploy.failed"
+  conditions   String   @default("[]") // JSON array of { field, op, value }
+  actionType   String   // "notify" | "telegram" | "webhook"
+  actionConfig String   @default("{}") // JSON action parameters
+  enabled      Boolean  @default(false)
+  dryRun       Boolean  @default(true)
+  lastFiredAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  runs         AutomationRun[]
+}
+
+/// Audit of each rule evaluation (matched or not, and what was done).
+model AutomationRun {
+  id          Int      @id @default(autoincrement())
+  ruleId      Int
+  rule        AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  event       String
+  matched     Boolean
+  dryRun      Boolean  @default(false)
+  actionTaken String?
+  detail      String?
+  createdAt   DateTime @default(now())
+
+  @@index([ruleId, createdAt])
 }

@@ -8,6 +8,7 @@
 
 import { FastifyPluginAsync } from 'fastify'
 import crypto from 'crypto'
+import { emitEvent } from '../lib/events'
 import { parseMoney, formatMoney, balanceDue } from '../lib/billing/money'
 import { DEFAULT_DUNNING_POLICY, parsePolicy, EnforcementLevel } from '../lib/billing/dunning'
 import {
@@ -555,6 +556,13 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
+    // Panel event bus (outbound webhooks + automation). Fire-and-forget.
+    emitEvent(app, 'billing.invoice_paid', {
+      invoiceId: id, number: invoice.number, currency: invoice.currency,
+      fullyPaid: result.fullyPaid, restored
+    })
+    if (restored) emitEvent(app, 'billing.restored', { invoiceId: id, subscriptionId: invoice.subscriptionId })
+
     return { ...result, restored }
   })
 
@@ -636,5 +644,66 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       status: s.status,
       enforcementLevel: s.enforcementLevel
     }))
+  })
+
+  // ── Server economics — cost vs revenue vs margin vs utilization ────────────
+  // Read-only. Ties each server's monthly cost (Server.monthlyCostMinor) to the
+  // revenue from the sites it hosts and its latest resource utilisation, so you
+  // can see which boxes are over- or under-subscribed. Sites with serverId=null
+  // bucket into the local server.
+  app.get('/server-economics', async () => {
+    const [servers, sites, subs] = await Promise.all([
+      db.server.findMany({ orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }] }),
+      db.site.findMany({ select: { id: true, serverId: true } }),
+      db.subscription.findMany({
+        where: { status: { not: 'cancelled' } },
+        select: { amount: true, currency: true, site: { select: { serverId: true } } }
+      })
+    ])
+
+    const localId: number | null = servers.find((s: any) => s.kind === 'local')?.id ?? null
+    // Unassigned (serverId=null) sites belong to the local server.
+    const bucketOf = (serverId: number | null): number | null => (serverId === null ? localId : serverId)
+
+    const result = await Promise.all(servers.map(async (srv: any) => {
+      const siteList = sites.filter((s: any) => bucketOf(s.serverId) === srv.id)
+      const subList = subs.filter((s: any) => bucketOf(s.site?.serverId ?? null) === srv.id)
+
+      const revMap = new Map<string, number>()
+      for (const sub of subList) revMap.set(sub.currency, (revMap.get(sub.currency) ?? 0) + sub.amount)
+
+      const costMinor = srv.monthlyCostMinor ?? 0
+      const costCurrency = srv.costCurrency ?? 'GEL'
+      const revenueInCostCcy = revMap.get(costCurrency) ?? 0
+
+      // Local server's metrics are stored with serverId=null.
+      const metricServerId = srv.kind === 'local' ? null : srv.id
+      const m = await db.metricSample.findFirst({
+        where: { serverId: metricServerId },
+        orderBy: { checkedAt: 'desc' },
+        select: { cpuPercent: true, ramPercent: true, diskPercent: true, checkedAt: true }
+      }).catch(() => null)
+
+      return {
+        serverId: srv.id,
+        name: srv.name,
+        kind: srv.kind,
+        siteCount: siteList.length,
+        billedSiteCount: subList.length,
+        costMinor,
+        costCurrency,
+        costFormatted: formatMoney(costMinor, costCurrency),
+        revenueByCurrency: [...revMap.entries()].map(([currency, minor]) => ({
+          currency, minor, formatted: formatMoney(minor, currency)
+        })),
+        marginMinor: revenueInCostCcy - costMinor,
+        marginCurrency: costCurrency,
+        marginFormatted: formatMoney(revenueInCostCcy - costMinor, costCurrency),
+        revenuePerSiteMinor: siteList.length ? Math.round(revenueInCostCcy / siteList.length) : 0,
+        utilization: m ? { cpu: m.cpuPercent, ram: m.ramPercent, disk: m.diskPercent, at: m.checkedAt } : null
+      }
+    }))
+
+    return { servers: result }
   })
 }

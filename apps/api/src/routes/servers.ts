@@ -16,7 +16,9 @@ function publicServer(s: any, siteCount = 0) {
     id: s.id, name: s.name, kind: s.kind, host: s.host, port: s.port,
     sshUser: s.sshUser, hasKey: !!s.sshKey, sshKeyFingerprint: s.sshKeyFingerprint,
     status: s.status, lastSeenAt: s.lastSeenAt, scriptsSynced: s.scriptsSynced,
-    notes: s.notes, createdAt: s.createdAt, siteCount
+    notes: s.notes, createdAt: s.createdAt,
+    monthlyCostMinor: s.monthlyCostMinor ?? 0, costCurrency: s.costCurrency ?? 'GEL',
+    siteCount
   }
 }
 
@@ -110,7 +112,9 @@ export const serversRoutes: FastifyPluginAsync = async (app) => {
           port:    { type: 'integer', minimum: 1, maximum: 65535 },
           sshUser: { type: 'string', minLength: 1, maxLength: 64 },
           sshKey:  { type: 'string', minLength: 1, maxLength: 20000 },
-          notes:   { type: 'string', maxLength: 1000 }
+          notes:   { type: 'string', maxLength: 1000 },
+          monthlyCostMinor: { type: 'integer', minimum: 0, maximum: 100000000 },
+          costCurrency:     { type: 'string', minLength: 3, maxLength: 3 }
         },
         additionalProperties: false
       }
@@ -119,10 +123,13 @@ export const serversRoutes: FastifyPluginAsync = async (app) => {
     const id = Number((request.params as { id: string }).id)
     const server = await prisma.server.findUnique({ where: { id } })
     if (!server) return reply.code(404).send({ error: 'Server not found' })
-    const b = request.body as { name?: string; host?: string; port?: number; sshUser?: string; sshKey?: string; notes?: string }
+    const b = request.body as { name?: string; host?: string; port?: number; sshUser?: string; sshKey?: string; notes?: string; monthlyCostMinor?: number; costCurrency?: string }
     const data: any = {}
     if (b.name !== undefined) data.name = b.name
     if (b.notes !== undefined) data.notes = b.notes
+    // Cost applies to any server (local included) for the economics report.
+    if (b.monthlyCostMinor !== undefined) data.monthlyCostMinor = b.monthlyCostMinor
+    if (b.costCurrency !== undefined) data.costCurrency = b.costCurrency.toUpperCase()
     if (server.kind !== 'local') {
       if (b.host !== undefined) data.host = b.host
       if (b.port !== undefined) data.port = b.port

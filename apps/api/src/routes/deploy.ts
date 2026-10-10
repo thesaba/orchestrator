@@ -9,6 +9,7 @@ import crypto from 'crypto'
 import os from 'os'
 import { notifyDeploy } from '../lib/notify'
 import { createNotification } from '../lib/notifications'
+import { emitEvent } from '../lib/events'
 import { decryptSecret, encryptSecret } from '../lib/crypto'
 import { isValidGitUrl, execFileP } from '../lib/exec'
 import { parseTestSummary } from '../lib/test-parse'
@@ -279,8 +280,12 @@ export async function runDeploy(
       }
     : {}
 
+  // Resolve the site's stack so deploy.sh runs the right runtime steps. Default
+  // 'laravel' keeps every existing site's deploy byte-for-byte identical.
+  const stackType = (await app.prisma.site.findUnique({ where: { id: siteId }, select: { stackType: true } }).catch(() => null))?.stackType ?? 'laravel'
+
   const envMap: Record<string, string> = {
-    REPO_URL: authenticatedRepoUrl, ...testEnv, ...(opts.ref ? { REF: opts.ref } : {})
+    REPO_URL: authenticatedRepoUrl, STACK: stackType, ...testEnv, ...(opts.ref ? { REF: opts.ref } : {})
   }
 
   let proc
@@ -449,6 +454,14 @@ export async function runDeploy(
       title: `Deploy ${status === 'success' ? 'succeeded' : 'failed'}${opts.domain ? ` — ${opts.domain}` : ''}`,
       body: commitHash ? `${opts.branch} @ ${commitHash}${commitMessage ? ` — ${commitMessage}` : ''}` : opts.branch,
       meta: { siteId, domain: opts.domain }
+    })
+
+    // Panel event bus (outbound webhooks + automation rules). Fire-and-forget —
+    // never blocks or affects the deploy.
+    emitEvent(app, status === 'success' ? 'deploy.succeeded' : 'deploy.failed', {
+      siteId, domain: opts.domain ?? null, branch: opts.branch,
+      commit: commitHash || null, status,
+      testsPassed: m.passed, testsFailed: m.failed, testsTotal: m.total
     })
 
     emitter.emit('done', status)
@@ -733,7 +746,8 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
           testUseSqlite:   { type: 'boolean' },
           tags:          { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
           pinned:        { type: 'boolean' },
-          notes:         { type: 'string', maxLength: 2000 }
+          notes:         { type: 'string', maxLength: 2000 },
+          stackType:     { type: 'string', enum: ['laravel', 'wordpress', 'static', 'node'] }
         },
         additionalProperties: false
       }
@@ -743,13 +757,14 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     const {
       repoUrl, branch, name, domain, disabled, renameOnDisk,
       gitToken, preDeploy, postDeploy, healthCheck, healthCheckUrl, tags, pinned, notes,
-      runTests, testCommand, testFailureMode, testTimeout, testUseSqlite
+      runTests, testCommand, testFailureMode, testTimeout, testUseSqlite, stackType
     } = request.body as {
       repoUrl?: string; branch?: string; name?: string; domain?: string; disabled?: boolean
       renameOnDisk?: boolean; gitToken?: string
       preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
       tags?: string[]; pinned?: boolean; notes?: string
       runTests?: boolean; testCommand?: string; testFailureMode?: string; testTimeout?: number; testUseSqlite?: boolean
+      stackType?: string
     }
 
     const existing = await app.prisma.site.findUnique({ where: { id: siteId } })
@@ -833,7 +848,8 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
         ...(testUseSqlite   !== undefined && { testUseSqlite }),
         ...(tags          !== undefined && { tags: JSON.stringify(tags) }),
         ...(pinned        !== undefined && { pinned }),
-        ...(notes         !== undefined && { notes })
+        ...(notes         !== undefined && { notes }),
+        ...(stackType     !== undefined && { stackType })
       }
     })
 

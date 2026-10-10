@@ -1,68 +1,103 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Card, BlockStack, InlineStack, Text, Button, ButtonGroup, DataTable, Badge, SkeletonBodyText } from '@shopify/polaris'
-import { RefreshIcon } from '@shopify/polaris-icons'
-import { api, ApmSite } from '../api/client'
+import { useEffect, useState } from 'react'
+import {
+  Card, BlockStack, InlineStack, Text, Badge, Banner, Spinner, Button, Box, Divider
+} from '@shopify/polaris'
+import { apmApi, type ApmData } from '../api/client'
 
-const WINDOWS = [{ label: '6h', value: 6 }, { label: '24h', value: 24 }, { label: '7d', value: 168 }]
-
-function ms(n: number | null): string { return n == null ? '—' : `${n} ms` }
-
-/**
- * Performance insights derived from synthetic uptime checks: response-time
- * percentiles (p50/p95/p99) and uptime % per monitored site, slowest first.
- */
-export function ApmCard() {
-  const [sites, setSites] = useState<ApmSite[] | null>(null)
-  const [hours, setHours] = useState(24)
+// Laravel-aware APM (read-only). Surfaces slow queries, slow requests and recent
+// exceptions from the site's Laravel Telescope data. Degrades gracefully when
+// Telescope isn't installed or the site is remote.
+export function ApmCard({ siteId }: { siteId: number }) {
+  const [data, setData] = useState<ApmData | null>(null)
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(() => {
+  async function load() {
     setLoading(true)
-    api.monitor.apm(hours).then((r) => setSites(r.sites)).catch(() => setSites([])).finally(() => setLoading(false))
-  }, [hours])
-  useEffect(() => { load() }, [load])
+    try { setData(await apmApi.get(siteId)) }
+    catch (e) { setError((e as Error).message) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [siteId])
+
+  const ms = (n: number | null) => (n === null ? '—' : `${Math.round(n)} ms`)
+  const msTone = (n: number | null) => (n === null ? undefined : n >= 1000 ? 'critical' : n >= 300 ? 'warning' : 'success') as 'critical' | 'warning' | 'success' | undefined
 
   return (
     <Card>
-      <BlockStack gap="400">
+      <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="center">
-          <BlockStack gap="050">
-            <Text as="h2" variant="headingMd">Performance (response times)</Text>
-            <Text as="span" variant="bodySm" tone="subdued">Percentiles from uptime checks · slowest first</Text>
-          </BlockStack>
-          <InlineStack gap="200" blockAlign="center">
-            <ButtonGroup variant="segmented">
-              {WINDOWS.map((w) => (
-                <Button key={w.value} pressed={hours === w.value} onClick={() => setHours(w.value)}>{w.label}</Button>
-              ))}
-            </ButtonGroup>
-            <Button icon={RefreshIcon} onClick={load} accessibilityLabel="Refresh" />
-          </InlineStack>
+          <Text as="h2" variant="headingMd">Performance (APM)</Text>
+          <Button size="slim" onClick={load} loading={loading}>Refresh</Button>
         </InlineStack>
 
-        {loading && !sites && <SkeletonBodyText lines={4} />}
+        {error && <Banner tone="critical" onDismiss={() => setError('')}>{error}</Banner>}
 
-        {sites && sites.length === 0 && (
-          <Text as="p" tone="subdued">No uptime data yet. Enable uptime monitoring on sites to collect response times.</Text>
+        {loading && !data && <InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="span" tone="subdued">Loading…</Text></InlineStack>}
+
+        {data && !data.installed && (
+          <Banner tone="info">{data.message ?? 'APM is not available for this site.'}</Banner>
         )}
 
-        {sites && sites.length > 0 && (
-          <DataTable
-            columnContentTypes={['text', 'text', 'numeric', 'numeric', 'numeric', 'numeric']}
-            headings={['Site', 'Uptime', 'p50', 'p95', 'p99', 'Samples']}
-            rows={sites.map((s) => [
-              <Text as="span" fontWeight="semibold">{s.domain}</Text>,
-              s.uptimePct != null
-                ? <Badge tone={s.uptimePct >= 99.9 ? 'success' : s.uptimePct >= 99 ? 'attention' : 'critical'}>{`${s.uptimePct}%`}</Badge>
-                : '—',
-              ms(s.p50),
-              ms(s.p95),
-              ms(s.p99),
-              String(s.samples)
-            ])}
-          />
+        {data?.installed && (
+          <BlockStack gap="400">
+            <Text as="p" tone="subdued" variant="bodySm">Last {data.windowHours ?? 24}h, from Laravel Telescope.</Text>
+
+            <InlineStack gap="400" wrap>
+              <Stat label="Requests" value={data.counts?.requests ?? 0} />
+              <Stat label="Queries" value={data.counts?.queries ?? 0} />
+              <Stat label="Slow queries (>100ms)" value={data.counts?.slowQueries ?? 0} tone={(data.counts?.slowQueries ?? 0) > 0 ? 'warning' : undefined} />
+              <Stat label="Exceptions" value={data.counts?.exceptions ?? 0} tone={(data.counts?.exceptions ?? 0) > 0 ? 'critical' : undefined} />
+            </InlineStack>
+
+            <Divider />
+            <Text as="h3" variant="headingSm">Slowest queries</Text>
+            {(data.slowQueries ?? []).length === 0
+              ? <Text as="p" tone="subdued" variant="bodySm">None recorded.</Text>
+              : (data.slowQueries ?? []).map((q, i) => (
+                <InlineStack key={i} align="space-between" blockAlign="start" gap="200" wrap={false}>
+                  <Box width="80%"><Text as="span" variant="bodySm" truncate>{q.query ?? '—'}</Text></Box>
+                  <Badge tone={msTone(q.ms)}>{ms(q.ms)}</Badge>
+                </InlineStack>
+              ))}
+
+            <Divider />
+            <Text as="h3" variant="headingSm">Slowest requests</Text>
+            {(data.slowRequests ?? []).length === 0
+              ? <Text as="p" tone="subdued" variant="bodySm">None recorded.</Text>
+              : (data.slowRequests ?? []).map((r, i) => (
+                <InlineStack key={i} align="space-between" blockAlign="center" gap="200" wrap={false}>
+                  <Box width="80%">
+                    <Text as="span" variant="bodySm" truncate>
+                      <Text as="span" fontWeight="semibold">{r.method ?? ''}</Text> {r.uri ?? '—'} {r.status ? `· ${r.status}` : ''}
+                    </Text>
+                  </Box>
+                  <Badge tone={msTone(r.ms)}>{ms(r.ms)}</Badge>
+                </InlineStack>
+              ))}
+
+            <Divider />
+            <Text as="h3" variant="headingSm">Recent exceptions</Text>
+            {(data.exceptions ?? []).length === 0
+              ? <Text as="p" tone="subdued" variant="bodySm">None recorded. 🎉</Text>
+              : (data.exceptions ?? []).map((e, i) => (
+                <BlockStack key={i} gap="050">
+                  <Text as="span" variant="bodySm" fontWeight="semibold" tone="critical">{e.class ?? 'Exception'}</Text>
+                  <Text as="span" variant="bodySm" truncate>{e.message ?? ''}</Text>
+                </BlockStack>
+              ))}
+          </BlockStack>
         )}
       </BlockStack>
     </Card>
+  )
+}
+
+function Stat({ label, value, tone }: { label: string; value: number; tone?: 'warning' | 'critical' }) {
+  return (
+    <BlockStack gap="050">
+      <Text as="span" tone="subdued" variant="bodySm">{label}</Text>
+      <Text as="span" variant="headingLg" tone={tone === 'critical' ? 'critical' : undefined}>{value}</Text>
+    </BlockStack>
   )
 }

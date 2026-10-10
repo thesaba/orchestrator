@@ -17,6 +17,10 @@ TIMESTAMP=$(date +%Y%m%d%H%M%S)
 RELEASE_DIR="$SITE_DIR/releases/$TIMESTAMP"
 SHARED_DIR="$SITE_DIR/shared"
 HOOKS_DIR="$SITE_DIR/hooks"
+# Stack type shapes which runtime steps run. Defaults to "laravel" so existing
+# sites deploy byte-for-byte as before. Passed via env by the API (Site.stackType):
+# laravel | wordpress | static | node.
+STACK="${STACK:-laravel}"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
@@ -31,11 +35,14 @@ run_hook() {
 
 log "=== Deploying branch '$BRANCH' to $SITE_DIR ==="
 
-# Guard: shared/.env must exist and be non-empty
-if [ ! -s "$SHARED_DIR/.env" ]; then
-  log "ERROR: $SHARED_DIR/.env is empty or missing."
-  log "       Populate it with APP_KEY, DB_* and other Laravel config before deploying."
-  exit 1
+# Guard: PHP stacks need a populated shared/.env. Static/Node sites don't, so the
+# check is scoped to laravel/wordpress (laravel behaviour unchanged).
+if [ "$STACK" = "laravel" ] || [ "$STACK" = "wordpress" ]; then
+  if [ ! -s "$SHARED_DIR/.env" ]; then
+    log "ERROR: $SHARED_DIR/.env is empty or missing."
+    log "       Populate it with APP_KEY, DB_* and other config before deploying."
+    exit 1
+  fi
 fi
 
 # ── PRE-DEPLOY HOOK ──────────────────────────────────────────────────────────
@@ -78,12 +85,16 @@ chmod -R ug+rwX bootstrap/cache
 # default CLI version), which can silently diverge from $PHP_VER and break
 # platform-requirement checks (e.g. composer.lock pinned to packages that
 # don't support the newer default PHP).
-log "[3/8] Installing PHP dependencies..."
-php${PHP_VER} "$(command -v composer)" install \
-  --no-dev \
-  --no-interaction \
-  --prefer-dist \
-  --optimize-autoloader
+if [ "$STACK" = "laravel" ] || { [ "$STACK" = "wordpress" ] && [ -f composer.json ]; }; then
+  log "[3/8] Installing PHP dependencies..."
+  php${PHP_VER} "$(command -v composer)" install \
+    --no-dev \
+    --no-interaction \
+    --prefer-dist \
+    --optimize-autoloader
+else
+  log "[3/8] Skipping composer (stack: $STACK)"
+fi
 
 # ── 3b. PHP tests (optional gate) ─────────────────────────────────────────────
 # Runs ONLY when RUN_TESTS=1 (set per site in Deploy Settings). Executes before
@@ -174,14 +185,22 @@ else
 fi
 
 # ── 5. Artisan caches ────────────────────────────────────────────────────────
-log "[5/8] Caching Laravel config, routes, views..."
-php${PHP_VER} artisan config:cache
-php${PHP_VER} artisan route:cache
-php${PHP_VER} artisan view:cache
+if [ "$STACK" = "laravel" ]; then
+  log "[5/8] Caching Laravel config, routes, views..."
+  php${PHP_VER} artisan config:cache
+  php${PHP_VER} artisan route:cache
+  php${PHP_VER} artisan view:cache
+else
+  log "[5/8] Skipping artisan caches (stack: $STACK)"
+fi
 
 # ── 6. Migrations ────────────────────────────────────────────────────────────
-log "[6/8] Running migrations..."
-php${PHP_VER} artisan migrate --force
+if [ "$STACK" = "laravel" ]; then
+  log "[6/8] Running migrations..."
+  php${PHP_VER} artisan migrate --force
+else
+  log "[6/8] Skipping migrations (stack: $STACK)"
+fi
 
 # ── 6b. Hand the release to the web/worker user ──────────────────────────────
 # The Supervisor queue worker runs as www-data and must be able to write
@@ -228,18 +247,22 @@ log "  current -> $RELEASE_DIR"
 # Reload does NOT drop in-flight connections. Note: OPcache SHM is shared by the
 # whole FPM master, so this briefly cold-starts every pool on this PHP version —
 # acceptable, as warm-up is a few seconds. Best-effort and never fatal.
-log "[7b/8] Resetting OPcache (graceful php-fpm reload)..."
-if [ "$(id -u)" = "0" ]; then
-  systemctl reload "php${PHP_VER}-fpm" || log "  WARN: php-fpm reload failed — OPcache not reset (continuing)"
-elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-  sudo systemctl reload "php${PHP_VER}-fpm" || log "  WARN: sudo php-fpm reload failed — OPcache not reset (continuing)"
-else
-  log "  NOTE: no root/passwordless sudo — OPcache not reset; old-release entries may accumulate."
+if [ "$STACK" = "laravel" ] || [ "$STACK" = "wordpress" ]; then
+  log "[7b/8] Resetting OPcache (graceful php-fpm reload)..."
+  if [ "$(id -u)" = "0" ]; then
+    systemctl reload "php${PHP_VER}-fpm" || log "  WARN: php-fpm reload failed — OPcache not reset (continuing)"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo systemctl reload "php${PHP_VER}-fpm" || log "  WARN: sudo php-fpm reload failed — OPcache not reset (continuing)"
+  else
+    log "  NOTE: no root/passwordless sudo — OPcache not reset; old-release entries may accumulate."
+  fi
 fi
 
 # ── 8. Cleanup ───────────────────────────────────────────────────────────────
 log "[8/8] Restarting queues and cleaning old releases..."
-php${PHP_VER} artisan queue:restart
+if [ "$STACK" = "laravel" ]; then
+  php${PHP_VER} artisan queue:restart
+fi
 
 KEPT=5
 ls -dt "$SITE_DIR/releases"/*/ 2>/dev/null | tail -n +$((KEPT + 1)) | xargs rm -rf || true

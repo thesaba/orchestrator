@@ -38,12 +38,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export type SiteTemplate = 'laravel' | 'wordpress' | 'static'
+export type StackType = 'laravel' | 'wordpress' | 'static' | 'node'
 
 export interface Site {
   id: number
   name: string
   domain: string
   phpVersion: string
+  stackType: StackType
+  stagingOf: number | null
   dbName: string | null
   dbUser: string | null
   sslEnabled: boolean
@@ -145,9 +148,10 @@ export const api = {
       renameOnDisk?: boolean; gitToken?: string
       preDeploy?: string; postDeploy?: string; healthCheck?: boolean; healthCheckUrl?: string
       runTests?: boolean; testCommand?: string; testFailureMode?: string; testTimeout?: number; testUseSqlite?: boolean
-      tags?: string[]; pinned?: boolean; notes?: string
+      tags?: string[]; pinned?: boolean; notes?: string; stackType?: StackType
     }) =>
       request<Site & { renameLog?: string }>(`/sites/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    createStaging: (id: number) => request<Site>(`/sites/${id}/staging`, { method: 'POST' }),
     clone: (id: number, data: { name: string; domain: string }) =>
       request<Site>(`/sites/${id}/clone`, { method: 'POST', body: JSON.stringify(data) }),
     branches: (id: number) =>
@@ -252,7 +256,7 @@ export const api = {
     list: () => request<{ servers: ServerInfo[] }>('/servers'),
     create: (data: { name: string; host: string; port?: number; sshUser?: string; sshKey: string; notes?: string }) =>
       request<ServerInfo>('/servers', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: { name?: string; host?: string; port?: number; sshUser?: string; sshKey?: string; notes?: string }) =>
+    update: (id: number, data: { name?: string; host?: string; port?: number; sshUser?: string; sshKey?: string; notes?: string; monthlyCostMinor?: number; costCurrency?: string }) =>
       request<ServerInfo>(`/servers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     remove: (id: number) => request<{ ok: true }>(`/servers/${id}`, { method: 'DELETE' }),
     test: (id: number) => request<ServerProbe>(`/servers/${id}/test`, { method: 'POST' }),
@@ -661,6 +665,8 @@ export interface ServerInfo {
   lastSeenAt: string | null
   scriptsSynced: boolean
   notes: string | null
+  monthlyCostMinor: number
+  costCurrency: string
   createdAt: string
   siteCount: number
 }
@@ -1048,6 +1054,52 @@ export const logsApi = {
     return request<{ entries: LogEntry[]; total: number; path: string }>(`/sites/${siteId}/logs${qs ? `?${qs}` : ''}`)
   },
   clear: (siteId: number) => request<{ ok: boolean }>(`/sites/${siteId}/logs`, { method: 'DELETE' })
+}
+
+export interface ApmSlowQuery   { query: string | null; ms: number | null; at: string }
+export interface ApmSlowRequest { uri: string | null; method: string | null; status: string | null; ms: number | null; at: string }
+export interface ApmException   { class: string | null; message: string | null; at: string }
+export interface ApmData {
+  installed: boolean
+  supported?: boolean
+  message?: string
+  windowHours?: number
+  counts?: { queries: number; slowQueries: number; requests: number; exceptions: number }
+  slowQueries?: ApmSlowQuery[]
+  slowRequests?: ApmSlowRequest[]
+  exceptions?: ApmException[]
+}
+export const apmApi = {
+  get: (siteId: number) => request<ApmData>(`/sites/${siteId}/apm`)
+}
+
+export interface WebhookInfo { id: number; name: string; url: string; events: string[]; active: boolean; hasSecret: boolean; createdAt: string }
+export interface WebhookDeliveryInfo { id: number; event: string; success: boolean; statusCode: number | null; error: string | null; createdAt: string }
+export interface AutomationRuleInfo {
+  id: number; name: string; trigger: string
+  conditions: Array<{ field: string; op: string; value: unknown }>
+  actionType: string; actionConfig: Record<string, unknown>
+  enabled: boolean; dryRun: boolean; lastFiredAt: string | null; createdAt: string
+}
+export interface AutomationRunInfo { id: number; event: string; matched: boolean; dryRun: boolean; actionTaken: string | null; detail: string | null; createdAt: string }
+
+export const automationApi = {
+  eventTypes: () => request<{ events: string[]; actions: string[] }>('/automation/event-types'),
+  listWebhooks: () => request<{ webhooks: WebhookInfo[] }>('/automation/webhooks'),
+  createWebhook: (d: { name: string; url: string; secret?: string; events?: string[]; active?: boolean }) =>
+    request<WebhookInfo>('/automation/webhooks', { method: 'POST', body: JSON.stringify(d) }),
+  updateWebhook: (id: number, d: Partial<{ name: string; url: string; secret: string; events: string[]; active: boolean }>) =>
+    request<WebhookInfo>(`/automation/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(d) }),
+  deleteWebhook: (id: number) => request<{ ok: true }>(`/automation/webhooks/${id}`, { method: 'DELETE' }),
+  testWebhook: (id: number) => request<{ ok: boolean; statusCode?: number; error?: string }>(`/automation/webhooks/${id}/test`, { method: 'POST' }),
+  deliveries: (id: number) => request<{ deliveries: WebhookDeliveryInfo[] }>(`/automation/webhooks/${id}/deliveries`),
+  listRules: () => request<{ rules: AutomationRuleInfo[] }>('/automation/rules'),
+  createRule: (d: { name: string; trigger: string; actionType: string; conditions?: unknown[]; actionConfig?: Record<string, unknown>; enabled?: boolean; dryRun?: boolean }) =>
+    request<AutomationRuleInfo>('/automation/rules', { method: 'POST', body: JSON.stringify(d) }),
+  updateRule: (id: number, d: Partial<{ name: string; trigger: string; actionType: string; conditions: unknown[]; actionConfig: Record<string, unknown>; enabled: boolean; dryRun: boolean }>) =>
+    request<AutomationRuleInfo>(`/automation/rules/${id}`, { method: 'PATCH', body: JSON.stringify(d) }),
+  deleteRule: (id: number) => request<{ ok: true }>(`/automation/rules/${id}`, { method: 'DELETE' }),
+  runs: (id: number) => request<{ runs: AutomationRunInfo[] }>(`/automation/rules/${id}/runs`)
 }
 
 export interface LogEntry {
@@ -1587,7 +1639,15 @@ export const billingApi = {
     siteId: number; domain: string; client: string; amount: number; currency: string
     amountFormatted: string; serverId: number | null; sitesOnServer: number
     status: string; enforcementLevel: EnforcementLevel
-  }>>('/billing/profitability')
+  }>>('/billing/profitability'),
+  serverEconomics: () => request<{ servers: Array<{
+    serverId: number; name: string; kind: string; siteCount: number; billedSiteCount: number
+    costMinor: number; costCurrency: string; costFormatted: string
+    revenueByCurrency: Array<{ currency: string; minor: number; formatted: string }>
+    marginMinor: number; marginCurrency: string; marginFormatted: string
+    revenuePerSiteMinor: number
+    utilization: { cpu: number; ram: number; disk: number; at: string } | null
+  }> }>('/billing/server-economics')
 }
 
 /** Format minor units for display, e.g. 3000 → "30.00 ₾". */

@@ -13,6 +13,7 @@
 import { FastifyInstance } from 'fastify'
 import { createNotification } from '../notifications'
 import { sendNotification } from '../notify'
+import { emitEvent } from '../events'
 import {
   parsePolicy,
   resolveLadder,
@@ -261,6 +262,9 @@ export async function runBillingTick(
             }
           })
           report.escalated.push(`${sub.site.domain}: ${r.from} → ${r.to}`)
+          if (r.to === 'suspend' || r.to === 'archived') {
+            emitEvent(app, 'billing.suspended', { siteId: sub.siteId, domain: sub.site.domain, level: r.to })
+          }
         } else {
           report.skipped.push(`${sub.site.domain}: ${r.reason ?? 'no change'}`)
         }

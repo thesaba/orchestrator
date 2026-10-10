@@ -42,6 +42,7 @@ import { FileManagerTab }    from '../components/FileManagerTab'
 import { DeployHeatmap }     from '../components/DeployHeatmap'
 import { TestResultsCard }   from '../components/TestResultsCard'
 import { HealthScoreBadge }  from '../components/HealthScoreBadge'
+import { ApmCard }           from '../components/ApmCard'
 import { Breadcrumb }        from '../components/Breadcrumb'
 import { useToast } from '../context/toast'
 import { DatabaseTab }       from '../components/DatabaseTab'
@@ -108,6 +109,7 @@ export function SiteDetailPage() {
   const [testTimeout, setTestTimeout]         = useState('300')
   const [testUseSqlite, setTestUseSqlite]     = useState(true)
   const [savingRepo, setSavingRepo]           = useState(false)
+  const [creatingStaging, setCreatingStaging] = useState(false)
 
   // Maintenance mode
   const [maintenanceMode, setMaintenanceMode] = useState(false)
@@ -169,6 +171,7 @@ export function SiteDetailPage() {
   // PHP version switcher
   const [phpVersions, setPhpVersions]   = useState<string[]>([])
   const [phpSelected, setPhpSelected]   = useState('')
+  const [stackSel, setStackSel]         = useState<'laravel' | 'wordpress' | 'static' | 'node'>('laravel')
   const [phpSwitching, setPhpSwitching] = useState(false)
   const [phpError, setPhpError]         = useState('')
 
@@ -177,6 +180,7 @@ export function SiteDetailPage() {
       const s = await api.sites.get(siteId)
       setSite(s)
       setRepoUrl(s.repoUrl ?? '')
+      setStackSel(s.stackType ?? 'laravel')
       setBranch(s.branch)
       setPreDeploy(s.preDeploy ?? '')
       setPostDeploy(s.postDeploy ?? '')
@@ -345,6 +349,7 @@ export function SiteDetailPage() {
         testFailureMode,
         testTimeout: Math.max(10, Math.min(3600, Number(testTimeout) || 300)),
         testUseSqlite,
+        stackType: stackSel,
         ...(gitToken ? { gitToken } : {})
       })
       setGitToken('')
@@ -732,6 +737,18 @@ export function SiteDetailPage() {
                     placeholder="https://github.com/user/repo.git" autoComplete="off"
                     helpText="HTTPS clone URL from GitHub / GitLab" />
                   <TextField label="Branch" value={branch} onChange={setBranch} autoComplete="off" />
+                  <Select
+                    label="Runtime stack"
+                    options={[
+                      { label: 'Laravel', value: 'laravel' },
+                      { label: 'WordPress', value: 'wordpress' },
+                      { label: 'Static', value: 'static' },
+                      { label: 'Node', value: 'node' }
+                    ]}
+                    value={stackSel}
+                    onChange={(v) => setStackSel(v as typeof stackSel)}
+                    helpText="Laravel runs composer + artisan on deploy; static/node skip all PHP steps (node builds via npm). Save, then deploy."
+                  />
                   <TextField label="Git Access Token (for private repos)" value={gitToken} onChange={setGitToken}
                     type="password" autoComplete="off"
                     placeholder={site.hasGitToken ? '•••••••• (saved — leave blank to keep)' : 'Personal Access Token, optional'}
@@ -867,6 +884,42 @@ export function SiteDetailPage() {
                     Save settings
                   </Button>
                 </InlineStack>
+
+                <Divider />
+
+                {/* Staging / preview */}
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingSm">Staging / preview</Text>
+                  {site.stagingOf ? (
+                    <Banner tone="info">This site is a staging copy of site #{site.stagingOf}.</Banner>
+                  ) : (
+                    <>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Creates a config copy at <InlineCode>staging.{site.domain}</InlineCode> with the same repo, branch and stack.
+                        Provision + deploy it like any site, and enable basic-auth so the preview isn’t public.
+                      </Text>
+                      <InlineStack align="start">
+                        <Button
+                          loading={creatingStaging}
+                          onClick={async () => {
+                            setCreatingStaging(true)
+                            try {
+                              const s = await api.sites.createStaging(siteId)
+                              showToast('Staging site created')
+                              navigate(`/sites/${s.id}`)
+                            } catch (e) {
+                              showToast(e instanceof Error ? e.message : 'Failed to create staging', { error: true })
+                            } finally {
+                              setCreatingStaging(false)
+                            }
+                          }}
+                        >
+                          Create staging site
+                        </Button>
+                      </InlineStack>
+                    </>
+                  )}
+                </BlockStack>
 
                 <Divider />
 
@@ -1151,9 +1204,12 @@ export function SiteDetailPage() {
 
           {/* Tab 14 — Laravel Logs */}
           {tab === TAB.LOGS && (
-            <Card>
-              <LaravelLogsTab siteId={siteId} />
-            </Card>
+            <BlockStack gap="400">
+              <ApmCard siteId={siteId} />
+              <Card>
+                <LaravelLogsTab siteId={siteId} />
+              </Card>
+            </BlockStack>
           )}
 
           {/* Tab 15 — File Manager */}
