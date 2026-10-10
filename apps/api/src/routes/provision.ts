@@ -42,7 +42,15 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
           // the single-quoted MySQL string literal in provision.sh (IDENTIFIED
           // BY '...') — i.e. no SQL injection into the privileged mysql session.
           dbPassword: { type: 'string', minLength: 8, maxLength: 128, pattern: "^[^'\"\\\\`]+$" },
-          template:   { type: 'string', enum: ['laravel', 'wordpress', 'static'] }
+          template:   { type: 'string', enum: ['laravel', 'wordpress', 'static', 'node'] },
+          // 1-click install: when true, a fresh app of `template` is installed into
+          // this site (and this site only) right after the base provision.
+          installApp:   { type: 'boolean' },
+          // WordPress install (only read when template=wordpress && installApp):
+          siteTitle:    { type: 'string', maxLength: 120, pattern: "^[^'\"\\\\`$\\n]*$" },
+          wpAdminUser:  { type: 'string', maxLength: 60,  pattern: '^[A-Za-z0-9_.@ -]+$' },
+          wpAdminEmail: { type: 'string', maxLength: 120, pattern: '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$' },
+          wpAdminPass:  { type: 'string', minLength: 8, maxLength: 128, pattern: "^[^'\"\\\\`$ ]+$" }
         },
         additionalProperties: false
       }
@@ -50,11 +58,24 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const siteId = Number(id)
-    const { dbName, dbUser, dbPassword, template = 'laravel' } = request.body as {
+    const {
+      dbName, dbUser, dbPassword, template = 'laravel',
+      installApp = false, siteTitle, wpAdminUser, wpAdminEmail, wpAdminPass
+    } = request.body as {
       dbName: string
       dbUser: string
       dbPassword: string
-      template?: 'laravel' | 'wordpress' | 'static'
+      template?: 'laravel' | 'wordpress' | 'static' | 'node'
+      installApp?: boolean
+      siteTitle?: string
+      wpAdminUser?: string
+      wpAdminEmail?: string
+      wpAdminPass?: string
+    }
+
+    // WordPress 1-click install needs an admin email + password up front.
+    if (installApp && template === 'wordpress' && (!wpAdminEmail || !wpAdminPass)) {
+      return reply.code(400).send({ error: 'WordPress install requires an admin email and password.' })
     }
 
     if (emitters.has(siteId)) {
@@ -87,55 +108,108 @@ export const provisionRoutes: FastifyPluginAsync = async (app) => {
     emitters.set(siteId, emitter)
     logBuffers.set(siteId, { lines: [] })
 
-    const script = localServer ? path.join(resolvedScriptsDir(), 'provision.sh') : `${scriptDir}/provision.sh`
-    const proc = await spawnOn(serverCtx, 'bash', [script, site.domain, site.phpVersion, dbName, dbUser, dbPassword, template], { tty: !localServer })
+    // Node apps are reverse-proxied to a loopback port. Derive one deterministically
+    // from the site id so the Nginx vhost and the supervisor program always agree,
+    // and two sites never collide. Range 3000–~13000, well clear of system ports.
+    const nodePort = template === 'node' ? 3000 + siteId : 0
+
+    const scriptFor = (name: string) =>
+      localServer ? path.join(resolvedScriptsDir(), name) : `${scriptDir}/${name}`
+
+    const proc = await spawnOn(
+      serverCtx, 'bash',
+      [scriptFor('provision.sh'), site.domain, site.phpVersion, dbName, dbUser, dbPassword, template, String(nodePort)],
+      { tty: !localServer }
+    )
 
     const addLine = (raw: string) => {
-      const buf = logBuffers.get(siteId)!
-      buf.lines.push(raw)
+      const buf = logBuffers.get(siteId)
+      if (buf) buf.lines.push(raw)
       emitter.emit('log', raw)
     }
 
     proc.stdout.on('data', (chunk: Buffer) => addLine(chunk.toString()))
     proc.stderr.on('data', (chunk: Buffer) => addLine(chunk.toString()))
 
-    proc.on('close', async (code) => {
-      const status = code === 0 ? 'active' : 'error'
-      await app.prisma.site.update({ where: { id: siteId }, data: { status } })
-
-      if (code === 0) {
-        // Register the primary database so the Databases page shows it
-        // immediately instead of the "will appear here once migrated" message.
-        // dbPass is intentionally empty — primary credentials live in shared/.env.
-        try {
-          await app.prisma.siteDatabase.upsert({
-            where:  { dbName },
-            create: { siteId, dbName, dbUser, dbPass: '', isPrimary: true },
-            update: {}  // already registered — leave it alone
-          })
-        } catch (err) {
-          console.error('[provision] Failed to create SiteDatabase record:', err)
-        }
-
-        // Best-effort: point DNS at this server via Cloudflare, if configured.
-        // Never blocks or fails provisioning — the outcome is just logged.
-        try {
-          const creds = await getCloudflareCreds(app.prisma)
-          if (isCloudflareConfigured(creds)) {
-            addLine('\n[dns] Creating Cloudflare A record...\n')
-            const r = await upsertARecord(creds, site.domain)
-            addLine(`[dns] ${r.ok ? '✓' : '✗'} ${r.message}\n`)
-          }
-        } catch (err) {
-          addLine(`[dns] ✗ ${(err as Error).message}\n`)
-        }
+    // Register the primary DB + best-effort Cloudflare DNS. Runs once, only after
+    // the whole flow (base provision, plus the 1-click install if requested) is OK.
+    const finalizeSuccess = async () => {
+      try {
+        await app.prisma.siteDatabase.upsert({
+          where:  { dbName },
+          create: { siteId, dbName, dbUser, dbPass: '', isPrimary: true },
+          update: {}
+        })
+      } catch (err) {
+        console.error('[provision] Failed to create SiteDatabase record:', err)
       }
+      try {
+        const creds = await getCloudflareCreds(app.prisma)
+        if (isCloudflareConfigured(creds)) {
+          addLine('\n[dns] Creating Cloudflare A record...\n')
+          const r = await upsertARecord(creds, site.domain)
+          addLine(`[dns] ${r.ok ? '✓' : '✗'} ${r.message}\n`)
+        }
+      } catch (err) {
+        addLine(`[dns] ✗ ${(err as Error).message}\n`)
+      }
+    }
 
+    const finish = (status: string) => {
       emitter.emit('done', status)
       emitters.delete(siteId)
-
-      // Keep log in memory for 30 min in case user reconnects
       setTimeout(() => logBuffers.delete(siteId), 30 * 60 * 1000)
+    }
+
+    const fail = async (msg?: string) => {
+      if (msg) addLine(msg)
+      await app.prisma.site.update({ where: { id: siteId }, data: { status: 'error' } }).catch(() => {})
+      finish('error')
+    }
+
+    proc.on('close', async (code) => {
+      if (code !== 0) return fail()
+
+      // Base provision (dirs + DB + vhost) succeeded. Without 1-click install we're done.
+      if (!installApp) {
+        await app.prisma.site.update({ where: { id: siteId }, data: { status: 'active' } })
+        await finalizeSuccess()
+        return finish('active')
+      }
+
+      // ── 1-click install: scaffold a fresh app into THIS site only ──────────────
+      // Optional/sensitive values go via env so titles & passwords can't be
+      // mis-split and never appear in argv. starter-install.sh re-validates them.
+      addLine(`\n[install] Installing a fresh ${template} app — this can take a minute...\n`)
+      const env: Record<string, string> = { APP_URL: `https://${site.domain}` }
+      if (template === 'node') env.NODE_PORT = String(nodePort)
+      if (template === 'wordpress') {
+        env.WP_TITLE       = siteTitle || site.name || site.domain
+        env.WP_ADMIN_USER  = wpAdminUser || 'admin'
+        env.WP_ADMIN_EMAIL = wpAdminEmail || ''
+        env.WP_ADMIN_PASS  = wpAdminPass || ''
+      }
+
+      try {
+        const starter = await spawnOn(
+          serverCtx, 'bash',
+          [scriptFor('starter-install.sh'), site.domain, site.phpVersion, dbName, dbUser, dbPassword, template],
+          { tty: !localServer, env }
+        )
+        starter.stdout.on('data', (c: Buffer) => addLine(c.toString()))
+        starter.stderr.on('data', (c: Buffer) => addLine(c.toString()))
+        starter.on('error', (err: Error) => { void fail(`\n[install] ✗ ${err.message}\n`) })
+        starter.on('close', async (scode) => {
+          if (scode === 0) {
+            await app.prisma.site.update({ where: { id: siteId }, data: { status: 'active' } })
+            await finalizeSuccess()
+            return finish('active')
+          }
+          await fail(`\n[install] ✗ Install failed (exit ${scode}). The site & vhost exist — you can deploy from Git instead.\n`)
+        })
+      } catch (err) {
+        await fail(`\n[install] ✗ ${(err as Error).message}\n`)
+      }
     })
 
     return { started: true, siteId }

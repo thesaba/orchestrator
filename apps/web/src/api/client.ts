@@ -37,7 +37,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
-export type SiteTemplate = 'laravel' | 'wordpress' | 'static'
+export type SiteTemplate = 'laravel' | 'wordpress' | 'static' | 'node'
 export type StackType = 'laravel' | 'wordpress' | 'static' | 'node'
 
 export interface Site {
@@ -164,7 +164,11 @@ export const api = {
   provision: {
     start: (
       siteId: number,
-      data: { dbName: string; dbUser: string; dbPassword: string; template?: SiteTemplate }
+      data: {
+        dbName: string; dbUser: string; dbPassword: string; template?: SiteTemplate
+        installApp?: boolean
+        siteTitle?: string; wpAdminUser?: string; wpAdminEmail?: string; wpAdminPass?: string
+      }
     ) =>
       request<{ started: boolean; siteId: number }>(`/sites/${siteId}/provision`, {
         method: 'POST',

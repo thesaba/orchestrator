@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Usage: provision.sh <domain> <php_version> <db_name> <db_user> <db_pass>
+# Usage: provision.sh <domain> <php_version> <db_name> <db_user> <db_pass> [template] [port]
+#   template ∈ laravel | wordpress | static | node   (default: laravel)
+#   port     only used by the 'node' template (loopback reverse-proxy target)
 #
 # Required sudoers entry on the server:
 #   deployer ALL=(ALL) NOPASSWD: /opt/orchestrator/scripts/provision.sh
@@ -33,7 +35,9 @@ SITE_DIR="/var/www/sites/$DOMAIN"
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 
 # Stack template (optional 6th arg): shapes the generated Nginx vhost.
+# Optional 7th arg PORT: only used by the 'node' template (loopback proxy target).
 TEMPLATE="${6:-laravel}"
+PORT="${7:-0}"
 INDEX="index.php index.html"
 case "$TEMPLATE" in
   laravel)
@@ -55,8 +59,31 @@ case "$TEMPLATE" in
     INDEX="index.html index.htm"
     INCLUDE_PHP=0
     ;;
+  node)
+    # Reverse-proxy to a Node process listening on 127.0.0.1:$PORT (run under
+    # supervisor by starter-install.sh). No PHP, no static document root served.
+    if ! printf '%s' "$PORT" | grep -qE '^[0-9]{2,5}$'; then
+      echo "ERROR: node template requires a valid PORT (arg 7), got '$PORT'" >&2; exit 1
+    fi
+    WEB_ROOT="$SITE_DIR/current"
+    # Double-quoted so ${PORT} expands now, while \$-prefixed nginx variables stay
+    # literal in the generated config.
+    MAIN_LOCATION="location / {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \"upgrade\";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 60s;
+    }"
+    ERROR_PAGE=''
+    INCLUDE_PHP=0
+    ;;
   *)
-    echo "ERROR: invalid template '$TEMPLATE' (expected laravel|wordpress|static)" >&2; exit 1 ;;
+    echo "ERROR: invalid template '$TEMPLATE' (expected laravel|wordpress|static|node)" >&2; exit 1 ;;
 esac
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
