@@ -50,6 +50,9 @@ run_hook "pre-deploy.sh"
 
 # ── 1. Clone ─────────────────────────────────────────────────────────────────
 log "[1/8] Cloning repository..."
+# Never block on an interactive credential prompt (there's no TTY): fail fast and
+# clearly if the repo needs auth the embedded token didn't satisfy.
+export GIT_TERMINAL_PROMPT=0
 git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$RELEASE_DIR"
 cd "$RELEASE_DIR"
 # Optional: deploy a specific ref (tag/branch/commit) instead of branch HEAD.

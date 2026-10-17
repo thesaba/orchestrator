@@ -117,6 +117,12 @@ function buildAuthenticatedUrl(repoUrl: string, token?: string | null): string {
   try {
     const url = new URL(repoUrl)
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return repoUrl
+    // Normalize to a ".git" path. GitHub/GitLab 301-redirect "/owner/repo" →
+    // "/owner/repo.git", and git DROPS the token embedded in the userinfo when it
+    // follows a cross-URL redirect — so without this the clone silently loses its
+    // credentials and fails with "could not read Username". Ending in ".git"
+    // avoids the redirect entirely.
+    if (!url.pathname.endsWith('.git')) url.pathname += '.git'
     url.username = token
     return url.toString()
   } catch { return repoUrl }
