@@ -112,21 +112,41 @@ function scriptsDir(): string {
   return path.isAbsolute(dir) ? dir : path.resolve(process.cwd(), dir)
 }
 
-function buildAuthenticatedUrl(repoUrl: string, token?: string | null): string {
-  if (!token) return repoUrl
+// Normalize an https repo URL to a clean ".git" path with NO embedded credentials.
+// We deliberately do NOT put the token in the URL: modern git drops URL-embedded
+// credentials when it follows GitHub's redirect (…/repo → …/repo.git/), which was
+// breaking every private-repo clone with "could not read Username". The token is
+// sent via an http.extraHeader instead (see gitAuthEnv) — that survives redirects.
+function normalizeRepoUrl(repoUrl: string): string {
   try {
     const url = new URL(repoUrl)
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return repoUrl
-    // Normalize to a ".git" path. GitHub/GitLab 301-redirect "/owner/repo" →
-    // "/owner/repo.git", and git DROPS the token embedded in the userinfo when it
-    // follows a cross-URL redirect — so without this the clone silently loses its
-    // credentials and fails with "could not read Username". Ending in ".git"
-    // avoids the redirect entirely.
-    url.pathname = url.pathname.replace(/\/+$/, '')          // drop trailing slash(es)…
-    if (!url.pathname.endsWith('.git')) url.pathname += '.git' // …before appending .git
-    url.username = token
+    url.username = ''
+    url.password = ''
+    url.pathname = url.pathname.replace(/\/+$/, '')
+    if (!url.pathname.endsWith('.git')) url.pathname += '.git'
     return url.toString()
   } catch { return repoUrl }
+}
+
+// Build the GIT_CONFIG_* environment that injects an Authorization header scoped
+// to the repo's host. git (any version ≥ 2.31) reads these automatically, for the
+// clone AND any redirect to the same host — so no token ever rides in the URL or
+// the process args. Returns {} for ssh/git@ URLs or when there's no token.
+function gitAuthEnv(repoUrl: string, token?: string | null): Record<string, string> {
+  if (!token) return {}
+  let host = ''
+  try {
+    const u = new URL(repoUrl)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return {}
+    host = `${u.protocol}//${u.host}/`
+  } catch { return {} }
+  const basic = Buffer.from(`x-access-token:${token}`).toString('base64')
+  return {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: `http.${host}.extraHeader`,
+    GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`
+  }
 }
 
 // Write a hook script (called before runDeploy so deploy.sh can source it).
@@ -268,9 +288,14 @@ export async function runDeploy(
     throw err
   }
 
-  const authenticatedRepoUrl = buildAuthenticatedUrl(opts.repoUrl, opts.gitToken)
-  const sanitize = (line: string) =>
-    opts.gitToken ? line.split(opts.gitToken).join('***') : line
+  const cloneUrl = normalizeRepoUrl(opts.repoUrl)
+  const authEnv  = gitAuthEnv(opts.repoUrl, opts.gitToken)
+  const b64Token = authEnv.GIT_CONFIG_VALUE_0?.split(' ').pop() // the base64 secret, for redaction
+  const sanitize = (line: string) => {
+    let out = opts.gitToken ? line.split(opts.gitToken).join('***') : line
+    if (b64Token) out = out.split(b64Token).join('***')
+    return out
+  }
 
   // Tests run only when enabled for the site AND not overridden by a one-off
   // "deploy without tests". These are passed via env (like REPO_URL) so they
@@ -292,7 +317,7 @@ export async function runDeploy(
   const stackType = (await app.prisma.site.findUnique({ where: { id: siteId }, select: { stackType: true } }).catch(() => null))?.stackType ?? 'laravel'
 
   const envMap: Record<string, string> = {
-    REPO_URL: authenticatedRepoUrl, STACK: stackType, ...testEnv, ...(opts.ref ? { REF: opts.ref } : {})
+    REPO_URL: cloneUrl, STACK: stackType, ...authEnv, ...testEnv, ...(opts.ref ? { REF: opts.ref } : {})
   }
 
   let proc
@@ -555,7 +580,9 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
     if (!site) return reply.code(404).send({ error: 'Site not found' })
     if (!site.repoUrl) return reply.code(400).send({ error: 'No repository URL configured' })
 
-    const url = buildAuthenticatedUrl(site.repoUrl, site.gitToken ? decryptSecret(site.gitToken) : null)
+    const token = site.gitToken ? decryptSecret(site.gitToken) : null
+    const url = normalizeRepoUrl(site.repoUrl)
+    const gitEnv = { ...process.env, ...gitAuthEnv(site.repoUrl, token) }
     const last = await app.prisma.deployment.findFirst({
       where: { siteId, status: 'success', commit: { not: null } },
       orderBy: { createdAt: 'desc' },
@@ -569,8 +596,8 @@ export const deployRoutes: FastifyPluginAsync = async (app) => {
       return { hash: (hash ?? '').slice(0, 7), subject: subject ?? '', author: author ?? '', date: date ?? '' }
     })
     try {
-      await execFileP('git', ['clone', '--bare', '--filter=blob:none', '--single-branch', '--branch', site.branch, url, tmp], { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })
-      const remoteCommit = (await execFileP('git', ['-C', tmp, 'rev-parse', 'HEAD'], { timeout: 10_000 })).stdout.trim().slice(0, 7)
+      await execFileP('git', ['clone', '--bare', '--filter=blob:none', '--single-branch', '--branch', site.branch, url, tmp], { timeout: 60_000, maxBuffer: 8 * 1024 * 1024, env: gitEnv })
+      const remoteCommit = (await execFileP('git', ['-C', tmp, 'rev-parse', 'HEAD'], { timeout: 10_000, env: gitEnv })).stdout.trim().slice(0, 7)
 
       let commits: ReturnType<typeof parse> = []
       let range = false
