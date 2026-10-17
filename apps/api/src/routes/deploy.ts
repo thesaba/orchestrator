@@ -122,7 +122,8 @@ function buildAuthenticatedUrl(repoUrl: string, token?: string | null): string {
     // follows a cross-URL redirect — so without this the clone silently loses its
     // credentials and fails with "could not read Username". Ending in ".git"
     // avoids the redirect entirely.
-    if (!url.pathname.endsWith('.git')) url.pathname += '.git'
+    url.pathname = url.pathname.replace(/\/+$/, '')          // drop trailing slash(es)…
+    if (!url.pathname.endsWith('.git')) url.pathname += '.git' // …before appending .git
     url.username = token
     return url.toString()
   } catch { return repoUrl }

@@ -50,6 +50,20 @@ run_hook "pre-deploy.sh"
 
 # ── 1. Clone ─────────────────────────────────────────────────────────────────
 log "[1/8] Cloning repository..."
+# Normalize https repo URLs to end in ".git". GitHub/GitLab 301-redirect the
+# non-".git" form to the ".git" one, and git DROPS the token embedded in the URL
+# when it follows that redirect → "could not read Username". Ending in ".git"
+# avoids the redirect. (ssh/git@ URLs are left untouched.)
+case "$REPO_URL" in
+  http*://*)
+    REPO_URL="${REPO_URL%/}"                       # drop a trailing slash
+    case "$REPO_URL" in
+      */.git) REPO_URL="${REPO_URL%/.git}.git" ;;  # fix a mistaken ".../repo/.git"
+      *.git)  : ;;                                 # already correct
+      *)      REPO_URL="${REPO_URL}.git" ;;        # ".../repo" → ".../repo.git"
+    esac
+    ;;
+esac
 # Never block on an interactive credential prompt (there's no TTY): fail fast and
 # clearly if the repo needs auth the embedded token didn't satisfy.
 export GIT_TERMINAL_PROMPT=0
