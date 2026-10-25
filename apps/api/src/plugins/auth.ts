@@ -30,8 +30,9 @@ export const jwtPlugin = fp(async (app) => {
         if (!pat || (pat.expiresAt && pat.expiresAt.getTime() < Date.now())) {
           return reply.code(401).send({ error: 'Invalid or expired access token' })
         }
-        // Mimic the JWT payload shape so every route works unchanged.
-        request.user = { userId: pat.user.id, email: pat.user.email, role: pat.user.role, viaPat: true }
+        // Mimic the JWT payload shape so every route works unchanged. patId/patName
+        // identify "which AI/client" for the MCP activity log.
+        request.user = { userId: pat.user.id, email: pat.user.email, role: pat.user.role, viaPat: true, patId: pat.id, patName: pat.name }
         // Best-effort "last used" — never blocks the request.
         app.prisma.personalAccessToken.update({ where: { id: pat.id }, data: { lastUsedAt: new Date() } }).catch(() => {})
         return

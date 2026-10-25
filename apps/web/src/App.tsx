@@ -30,6 +30,7 @@ const StatusPage     = lazy(() => named(import('./pages/StatusPage'), 'StatusPag
 const BillingPage    = lazy(() => named(import('./pages/BillingPage'), 'BillingPage'))
 const ClientPortalPage = lazy(() => named(import('./pages/ClientPortalPage'), 'ClientPortalPage'))
 const AutomationPage = lazy(() => named(import('./pages/AutomationPage'), 'AutomationPage'))
+const AiActivityPage = lazy(() => named(import('./pages/AiActivityPage'), 'AiActivityPage'))
 
 function RouteFallback() {
   return (
@@ -117,6 +118,7 @@ function AppRoutes() {
                   <Route path="/billing"    element={<AdminRoute><BillingPage /></AdminRoute>} />
                   <Route path="/assistant"  element={<AdminRoute><AssistantPage /></AdminRoute>} />
                   <Route path="/automation" element={<AdminRoute><AutomationPage /></AdminRoute>} />
+                  <Route path="/ai-activity" element={<AdminRoute><AiActivityPage /></AdminRoute>} />
                   <Route path="/tasks"      element={<TasksPage />} />
                   <Route path="/notes"      element={<NotesPage />} />
                   <Route path="/calendar"   element={<CalendarPage />} />

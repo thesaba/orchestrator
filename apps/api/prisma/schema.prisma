@@ -317,6 +317,29 @@ model AuditLog {
   createdAt DateTime @default(now())
 }
 
+// Every API request made with a Personal Access Token (i.e. by an MCP/AI client)
+// is recorded here — reads and actions alike — so the panel can show exactly what
+// each AI did. Additive: nothing writes here unless a PAT is used.
+model McpActivity {
+  id         Int      @id @default(autoincrement())
+  createdAt  DateTime @default(now())
+  tokenId    Int?     // PersonalAccessToken id (null if the token was deleted)
+  tokenName  String?  // the token's display name — "which AI/client"
+  userEmail  String?  // the user the token belongs to
+  tool       String?  // MCP tool name from the X-MCP-Tool header (e.g. deploy_site)
+  method     String   // HTTP method
+  path       String   // request path (no secrets)
+  siteId     Int?     // target site, when the route is site-scoped
+  status     Int      // HTTP status code
+  ok         Boolean  // status < 400
+  durationMs Int?
+  ip         String?
+  detail     String?  // short error message when !ok
+
+  @@index([createdAt])
+  @@index([tokenId])
+}
+
 model Setting {
   key       String   @id
   value     String

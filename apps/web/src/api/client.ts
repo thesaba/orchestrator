@@ -1109,6 +1109,38 @@ export const automationApi = {
   runs: (id: number) => request<{ runs: AutomationRunInfo[] }>(`/automation/rules/${id}/runs`)
 }
 
+export interface McpActivityItem {
+  id: number
+  createdAt: string
+  tokenId: number | null
+  tokenName: string | null
+  userEmail: string | null
+  tool: string | null
+  method: string
+  path: string
+  siteId: number | null
+  status: number
+  ok: boolean
+  durationMs: number | null
+  ip: string | null
+}
+export interface McpActivitySummary { last24h: number; actions24h: number; errors24h: number }
+
+export const mcpActivityApi = {
+  list: (params?: { tokenId?: number; siteId?: number; tool?: string; type?: 'read' | 'write'; q?: string; limit?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.tokenId) qs.set('tokenId', String(params.tokenId))
+    if (params?.siteId)  qs.set('siteId', String(params.siteId))
+    if (params?.tool)    qs.set('tool', params.tool)
+    if (params?.type)    qs.set('type', params.type)
+    if (params?.q)       qs.set('q', params.q)
+    if (params?.limit)   qs.set('limit', String(params.limit))
+    const s = qs.toString()
+    return request<{ items: McpActivityItem[]; summary: McpActivitySummary }>(`/mcp-activity${s ? `?${s}` : ''}`)
+  },
+  filters: () => request<{ tokens: Array<{ tokenId: number | null; tokenName: string | null }>; tools: string[] }>('/mcp-activity/filters')
+}
+
 export interface LogEntry {
   timestamp: string | null
   environment: string | null

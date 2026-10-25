@@ -1,5 +1,8 @@
 packages:
   - 'apps/*'
+  # The MCP server is a standalone package with its own (npm) deps — keep it out
+  # of the pnpm workspace so `pnpm build` for api/web is never affected by it.
+  - '!apps/mcp'
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true

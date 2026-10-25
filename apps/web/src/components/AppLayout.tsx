@@ -320,6 +320,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             ...(isAdmin ? [{ label: 'Billing', icon: CashDollarIcon, url: '/billing' }] : []),
             ...(isAdmin ? [{ label: 'AI Assistant', icon: MagicIcon, url: '/assistant' }] : []),
             ...(isAdmin ? [{ label: 'Automation', icon: RefreshIcon, url: '/automation' }] : []),
+            ...(isAdmin ? [{ label: 'AI Activity', icon: ListBulletedIcon, url: '/ai-activity' }] : []),
             { label: 'Settings',   icon: SettingsIcon,      url: '/settings' },
             ...(isAdmin ? [{ label: 'Team', icon: TeamIcon, url: '/team' }] : []),
             ...(isAdmin ? [{ label: 'Server', icon: GaugeIcon, url: '/server' }] : []),

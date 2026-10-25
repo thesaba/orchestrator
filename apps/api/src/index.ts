@@ -6,6 +6,8 @@ import websocket from '@fastify/websocket'
 import multipart from '@fastify/multipart'
 import { prismaPlugin } from './plugins/prisma'
 import { jwtPlugin } from './plugins/auth'
+import { mcpActivityPlugin } from './plugins/mcp-activity'
+import { mcpActivityRoutes } from './routes/mcp-activity'
 import { auditPlugin } from './plugins/audit'
 import { rbacPlugin } from './plugins/rbac'
 import { usersRoutes } from './routes/users'
@@ -97,6 +99,7 @@ async function start() {
   await app.register(jwtPlugin)
   await app.register(auditPlugin)
   await app.register(rbacPlugin)
+  await app.register(mcpActivityPlugin)
 
   await app.register(authRoutes,        { prefix: '/api/auth' })
   await app.register(sitesRoutes,       { prefix: '/api/sites' })
@@ -144,6 +147,7 @@ async function start() {
   await app.register(dashboardRoutes,   { prefix: '/api/dashboard' })
   await app.register(systemRoutes,      { prefix: '/api/system' })
   await app.register(tokensRoutes,      { prefix: '/api/tokens' })
+  await app.register(mcpActivityRoutes, { prefix: '/api/mcp-activity' })
   await app.register(notificationsRoutes, { prefix: '/api/notifications' })
   await app.register(alertsRoutes,      { prefix: '/api/alerts' })
   await app.register(logErrorsRoutes,   { prefix: '/api/log-errors' })
